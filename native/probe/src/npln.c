@@ -571,7 +571,7 @@ static void ov_eventfd(Cpu *c) {
     g_wake_peer[fd] = wr;
     g_wake_count[fd] = arg_x(c, 0);
     g_wake_semaphore[fd] = (arg_x(c, 1) & 1) != 0;
-    if (g_wake_count[fd]) send(wr, "w", 1, 0);
+    if (g_wake_count[fd]) send(wr, "w", 1, PLAT_DONTWAIT);
     mlog("EventFd -> fd=%d flags=%llu", fd, (unsigned long long)arg_x(c, 1));
     ret_x(c, (uint64_t)fd);
     return;
@@ -592,7 +592,7 @@ static void ov_eventfd_read(Cpu *c) {
     if (count) {
         *out = g_wake_semaphore[fd] ? 1 : count;
         g_wake_count[fd] -= *out;
-        if (!g_wake_count[fd]) { char byte; recv(g_sock[fd], &byte, 1, 0); }
+        if (!g_wake_count[fd]) { char byte; recv(g_sock[fd], &byte, 1, PLAT_DONTWAIT); }
     }
     plat_unlock(&g_wake_lock);
     if (!count) g_errno = G_EAGAIN;
@@ -607,7 +607,7 @@ static void ov_eventfd_write(Cpu *c) {
     plat_lock(&g_wake_lock);
     uint64_t count = g_wake_count[fd];
     int ok = value < UINT64_MAX - count;
-    if (ok && value && !count) ok = send(g_wake_peer[fd], "w", 1, 0) == 1;
+    if (ok && value && !count) ok = send(g_wake_peer[fd], "w", 1, PLAT_DONTWAIT) == 1;
     if (ok) g_wake_count[fd] += value;
     plat_unlock(&g_wake_lock);
     if (!ok) g_errno = G_EAGAIN;
@@ -1022,7 +1022,7 @@ static void ov_pia_sendto(Cpu *c) {
              has_guest ? (unsigned)((guest[2] << 8) | guest[3]) : 0);
     }
     if (g_trace_edges) rhex(">>> Pia UDP", buf, (size_t)len);
-    int sent =sendto(s, buf, (int)len, 0, (struct sockaddr *)&sa, sizeof sa);
+    int sent =sendto(s, buf, (int)len, PLAT_DONTWAIT, (struct sockaddr *)&sa, sizeof sa);
     if (sent < 0) g_errno = plat_net_error() == PLAT_NET_WOULDBLOCK ? G_EAGAIN : G_EINVAL;
     ret_x(c, (uint64_t)(int64_t)sent);
 }
@@ -1038,7 +1038,7 @@ static void ov_pia_recvfrom(Cpu *c) {
     }
     struct sockaddr_in sa;
     plat_socklen_t addrlen = sizeof sa;
-    int got = recvfrom(s, buf, (int)cap, 0, (struct sockaddr *)&sa, &addrlen);
+    int got = recvfrom(s, buf, (int)cap, PLAT_DONTWAIT, (struct sockaddr *)&sa, &addrlen);
     if (got < 0) {
         int err = plat_net_error();
         g_errno = err == PLAT_NET_WOULDBLOCK || err == PLAT_NET_CONNRESET ? G_EAGAIN : G_EINVAL;
@@ -1068,7 +1068,7 @@ __attribute__((unused)) static void ov_pia_recv(Cpu *c) {
     if (s == PLAT_NO_SOCK || !buf || cap > INT_MAX) {
         g_errno = G_EINVAL; ret_x(c, UINT64_MAX); return;
     }
-    int got = recv(s, buf, (int)cap, 0);   // the probe's sockets are non-blocking, so MSG_DONTWAIT is implied
+    int got = recv(s, buf, (int)cap, PLAT_DONTWAIT);   // non-blocking sockets, and the flag for the PS5 (plat_net.h)
     if (got < 0) {
         int err = plat_net_error();
         g_errno = err == PLAT_NET_WOULDBLOCK || err == PLAT_NET_CONNRESET ? G_EAGAIN : G_EINVAL;

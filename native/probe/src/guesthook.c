@@ -5,6 +5,11 @@
 #include "plat.h"
 #include <string.h>
 
+static volatile uint64_t g_main_base = GUEST_MAIN_DESKTOP;
+
+uint64_t guest_main_base(void) { return plat_load(&g_main_base); }
+void guest_set_main_base(uint64_t base) { plat_store(&g_main_base, base ? base : GUEST_MAIN_DESKTOP); }
+
 static uint64_t g_next_fake = 0x00000FF000000000ull;   // far outside every guest module and the flat table
 
 static int mapped(uint64_t addr, size_t n) { return plat_mem_readable((const void *)(uintptr_t)addr) >= n; }

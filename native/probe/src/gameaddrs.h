@@ -3,8 +3,10 @@
 //
 // Rules:
 //   - game_addrs() is NULL for an unknown build and while main is not mapped: every version-specific hook stays off.
-//   - Addresses are absolute guest addresses (main is at 0x7000000000). A zero address in a diagnostic field turns
-//     that trace off for the build, so a new game version can ship with only the functional fields filled.
+//   - Addresses are absolute guest addresses for main at 0x7000000000; game_addrs_for moves them to where main is on
+//     another layout (guesthook.h guest_main_base). Every uint64_t field is an address (gameaddrs.c rebase). A zero
+//     address in a diagnostic field turns that trace off for the build, so a new game version can ship with only the
+//     functional fields filled.
 //   - Before a functional hook is installed its guard values are checked against guest memory (game_guard_*): a wrong
 //     row or a patched image is logged and the hook is skipped.
 #ifndef MKWMP_GAMEADDRS_H

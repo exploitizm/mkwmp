@@ -137,9 +137,48 @@ static const struct game_addrs kRows[] = {
     },
 };
 
+// The rows are written for main at 0x7000000000. On a layout that loads it elsewhere (the PS5 title), every module
+// keeps its distance from main (1.8.0 on the PS5: subsdk0 +0x3800000, subsdk1 +0x3a00000, sdk +0x4400000, as on the
+// desktop), so each address moves by main's offset. 0 stays 0 (a field that is off). The guards then check the moved
+// addresses' words before any hook goes in, so a layout that broke that rule leaves the hooks off, not wrong.
+static void move(uint64_t *a, size_t n, uint64_t delta) {
+    for (size_t i = 0; i < n; i++)
+        if (a[i]) a[i] += delta;
+}
+#define MOVE(field) move((uint64_t *)&(field), sizeof(field) / sizeof(uint64_t), delta)
+
+static void rebase(struct game_addrs *r, uint64_t delta) {
+    MOVE(r->grpc_timedwait_lr);
+    MOVE(r->sdk_mono_source_slot), MOVE(r->sdk_tick_source);
+    MOVE(r->errsvc_post), MOVE(r->errsvc_vtable);
+    MOVE(r->vt_online_pause), MOVE(r->fn_pause_open), MOVE(r->fn_pause_frame), MOVE(r->fn_plate_text);
+    MOVE(r->stock_lo), MOVE(r->stock_hi);
+    MOVE(r->cam_check_slot), MOVE(r->cam_check_fn), MOVE(r->cam_service), MOVE(r->cam_query_at), MOVE(r->cam_ret0);
+    MOVE(r->pia_join_step), MOVE(r->trace_ranges), MOVE(r->watch), MOVE(r->game_global);
+    MOVE(r->room_sync), MOVE(r->room_main), MOVE(r->room_vote), MOVE(r->room_event);
+    MOVE(r->kart_entry), MOVE(r->bulkget_lr), MOVE(r->bulkget_fn);
+    MOVE(r->ctl_event_sink), MOVE(r->ctl_next_lr), MOVE(r->ctl_prepare_lr), MOVE(r->seq_wait), MOVE(r->seq_start);
+}
+// Every uint64_t of struct game_addrs is an address and is in rebase(): a new one must be added there.
+
 const struct game_addrs *game_addrs_for(int build) {
-    for (size_t i = 0; i < sizeof kRows / sizeof kRows[0]; i++)
-        if (kRows[i].build == build) return &kRows[i];
+    enum { ROWS = sizeof kRows / sizeof kRows[0] };
+    static struct game_addrs moved[ROWS];
+    static uint64_t moved_for[ROWS];   // the main base each copy was made for (0: none yet)
+    static PlatLock lock = PLAT_LOCK_INIT;
+    uint64_t base = guest_main_base();
+    for (size_t i = 0; i < ROWS; i++) {
+        if (kRows[i].build != build) continue;
+        if (base == GUEST_MAIN_DESKTOP) return &kRows[i];
+        plat_lock(&lock);
+        if (moved_for[i] != base) {
+            moved[i] = kRows[i];
+            rebase(&moved[i], base - GUEST_MAIN_DESKTOP);
+            moved_for[i] = base;
+        }
+        plat_unlock(&lock);
+        return &moved[i];
+    }
     return NULL;
 }
 

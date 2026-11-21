@@ -12,7 +12,13 @@
 #include <stdint.h>
 
 enum { GUEST_MAIN_BASE_HI = 0x70 };              // main is loaded at 0x7000000000 (recomp layout.py FIRST_BASE)
-#define GUEST_MAIN(off) (0x7000000000ull + (uint64_t)(off))
+// Where main is: 0x7000000000 on the desktop layouts, elsewhere on others (mkw-recomp's PS5 title: 0x2800000000).
+// The backend sets it once the game is loaded (plugin API module_base); every main+0x... address of the probe goes
+// through it, and gameaddrs.c moves its rows by the same amount (the modules keep their distances from main).
+#define GUEST_MAIN_DESKTOP 0x7000000000ull
+uint64_t guest_main_base(void);
+void guest_set_main_base(uint64_t base);
+#define GUEST_MAIN(off) (guest_main_base() + (uint64_t)(off))
 
 // Which game build is mapped at 0x7000000000: identified by main's MOD0 offset (main+4) and its GNU build-id note
 // (research/docs/GAME-1.8.0-ADDRESSES.md §1). Every main+0x... constant of the probe is in the build's row of

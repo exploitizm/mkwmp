@@ -51,7 +51,7 @@ static long msg(PlatSock s, PlatIov *v, int n, int reading) {
     if (n < 0 || n > MAX_IOV) return -1;
     for (int i = 0; i < n; i++) io[i].iov_base = v[i].base, io[i].iov_len = v[i].len;
     struct msghdr m = {.msg_iov = io, .msg_iovlen = (size_t)n};
-    ssize_t r = reading ? recvmsg(s, &m, 0) : sendmsg(s, &m, MSG_NOSIGNAL);
+    ssize_t r = reading ? recvmsg(s, &m, PLAT_DONTWAIT) : sendmsg(s, &m, MSG_NOSIGNAL | PLAT_DONTWAIT);
     return (long)r;
 }
 

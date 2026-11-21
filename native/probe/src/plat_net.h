@@ -16,6 +16,7 @@ typedef int plat_socklen_t;
 typedef WSAPOLLFD PlatPollFd;
 #define PLAT_POLLIN POLLRDNORM
 #define PLAT_POLLOUT POLLWRNORM
+#define PLAT_DONTWAIT 0   // ioctlsocket(FIONBIO) holds on Winsock
 #else
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -28,6 +29,10 @@ typedef socklen_t plat_socklen_t;
 typedef struct pollfd PlatPollFd;
 #define PLAT_POLLIN POLLIN
 #define PLAT_POLLOUT POLLOUT
+// Every read and send of a socket meant not to wait passes this: the PS5 ignores O_NONBLOCK on its sockets (a recv
+// with nothing to read blocked; mkw-recomp's runtime/net/net_udp.c found the same), so plat_sock_nonblock alone is
+// not enough there. On Linux the socket is non-blocking already and the flag changes nothing.
+#define PLAT_DONTWAIT MSG_DONTWAIT
 #endif
 
 #include "plat.h"

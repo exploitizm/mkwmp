@@ -326,7 +326,7 @@ static int tr(int what) {
 //       is wanted in this scene (0x1cb64f8); +0x120's bit 3 goes with bit 12 in the scene update (0x25a184).
 //   The inputs of mode 2: the u32 at [[main+0x37c9828]+0xd8]+8 (0xd956e0: must be 0) and the session number, the u64
 //       at [[main+0x37be190]+0x48]+0x170 (0x258f340: must not be 0; its decimal text is the sharing key).
-#define GAME_MAIN(off) (0x7000000000ull + (uint64_t)(off))
+#define GAME_MAIN(off) GUEST_MAIN(off)   // guesthook.h: where main is on this layout
 static int peek(uint64_t addr, void *out, size_t n) {
     memset(out, 0, n);
     if (plat_mem_readable((const void *)(uintptr_t)addr) < n) return 0;

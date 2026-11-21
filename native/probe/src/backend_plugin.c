@@ -105,9 +105,11 @@ static void on_game_loaded(void *user) {
     if (g_seat_early && g_active) seat_take_early();   // connecting... / in line / connected, in the menus already
     if (g_needs_setup && g_api->notice)
         g_api->notice("MKWMP: open Mods, MKWMP, Options on the start screen to set up online play", 10);
-    if (main && main != GUEST_MAIN(0))
-        mkwmp_log("plugin: main is not at %#llx: every version-specific hook stays off", (unsigned long long)GUEST_MAIN(0));
-    else if (g_active) {
+    if (main && main != GUEST_MAIN_DESKTOP)   // another layout (the PS5 title): the address rows move with main
+        mkwmp_log("plugin: main at %#llx, not %#llx: version-specific addresses moved by %#llx", (unsigned long long)main,
+                  (unsigned long long)GUEST_MAIN_DESKTOP, (unsigned long long)(main - GUEST_MAIN_DESKTOP));
+    if (main) guest_set_main_base(main);
+    if (g_active) {
         npln_address_hooks();   // error skips, idle-kick guard, BulkGet / Pia / matchmake traces (by game build)
         voice_ui_install();     // the online pause menu's voice labels
         camera_game_loaded();   // the game's "Use the camera?" prompt (nothing unless the camera is installed)
