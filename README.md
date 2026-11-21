@@ -176,6 +176,28 @@ python native/probe/build.py --install "C:\Games\mkw-recomp"       # build and c
 
 `--zig PATH` selects the zig binary; the default is `zig` on your PATH.
 
+### PS5 (mkw-recomp's PS5 title)
+
+The console loads no libraries, so there the plugin is linked into the title by mkw-recomp's PS5 build, from the
+source list in [`native/probe/ps5/plugin.list`](native/probe/ps5/plugin.list):
+
+```sh
+python tools/ps5/build_game.py --stack "$stack" --include "$headers" --generated ... --exefs ... \
+    --plugin /path/to/mkwmp/native/probe/ps5          # run in the mkw-recomp checkout
+```
+
+It needs a mkw-recomp whose plugin API takes `--plugin` (a plugin linked in). What differs from the Linux plugin:
+
+- **Server address over `http://`.** The PS5 build has its own small HTTP client (`plat_http_ps5.c`) and no TLS
+  for the seat API yet; host names go to the console's resolver (`plat_net_ps5.c`).
+- **No voice chat or camera**: they are libraries, which the console cannot load.
+- **Settings by file.** The title's menu has no mod tabs yet, so the options page's values go in the player's
+  `mod-settings/mkwmp.ini` by hand: `consent18=1`, `server=http://HOST:7000`, `pin=` and `pin_name=` (your
+  six-digit PIN and the name it belongs to, which must be the player's profile name).
+
+`plat_http_ps5.c` runs on Linux too, and `build_plugin.py --test` tests it there (`tests/test_http_ps5.c`). Not yet
+run on a console.
+
 ### Tests
 
 ```sh

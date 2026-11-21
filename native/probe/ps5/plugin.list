@@ -1,0 +1,40 @@
+# MKWMP on mkw-recomp's PS5 title: the plugin linked in, since the console loads no libraries.
+#   tools/ps5/build_game.py --plugin <this folder>   (mkw-recomp's PS5 build; tools/build/plugin_glue.py there)
+# The same sources as the Linux .so (build_plugin.py), with the PS5's platform files in place of plat_posix.c and
+# plat_http_posix.c (no /proc, no libcurl, no libraries), and the console's resolver (plat_net_ps5.c).
+name=mkwmp
+
+# core (build.py's SOURCES without the Windows-only files)
+../src/probe.c
+../src/log.c
+../src/config.c
+../src/notify.c
+../src/launcher.c
+../src/seat.c
+../src/uuid5.c
+../src/friends.c
+../src/lobby_ca.c
+../src/voice.c
+../src/voice_ui.c
+../src/guesthook.c
+../src/gameaddrs.c
+../src/npln.c
+
+# platform
+../src/plat_ps5.c
+../src/plat_net_posix.c
+../src/plat_net_ps5.c
+../src/plat_http_ps5.c
+
+# the plugin's own parts (build_plugin.py's PLUGIN_ONLY) and its backend
+../src/seatapi.c
+../src/seatd.c
+../src/modpage.c
+../src/voicetab.c
+../src/camera.c
+../src/camcodec.c
+../src/camlib.c
+../src/cameratab.c
+../src/chatroom.c
+../src/roomnet.c
+../src/backend_plugin.c

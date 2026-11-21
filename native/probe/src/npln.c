@@ -516,19 +516,10 @@ static void net_init(void) {
     if (!host || !*host) host = "127.0.0.1";
     g_server.sin_family = AF_INET;
     g_server.sin_port = htons((unsigned short)pnum);
-    g_server.sin_addr.s_addr = inet_addr(host);
-    if (g_server.sin_addr.s_addr == INADDR_NONE) {
-        // Hostname (e.g. mkwlb.anarqz.dev): resolve once, IPv4.
-        struct addrinfo hints = {0}, *res = NULL;
-        hints.ai_family = AF_INET;
-        hints.ai_socktype = SOCK_STREAM;
-        if (!getaddrinfo(host, NULL, &hints, &res) && res) {
-            g_server.sin_addr = ((struct sockaddr_in *)res->ai_addr)->sin_addr;
-            freeaddrinfo(res);
-        } else {
-            mlog("net: cannot resolve lobby host %s, using 127.0.0.1", host);
-            g_server.sin_addr.s_addr = inet_addr("127.0.0.1");
-        }
+    // A dotted quad, or a host name (e.g. mkwlb.anarqz.dev) resolved once, IPv4 (plat_net.h: the PS5's own resolver)
+    if (!plat_resolve_ipv4(host, &g_server.sin_addr)) {
+        mlog("net: cannot resolve lobby host %s, using 127.0.0.1", host);
+        g_server.sin_addr.s_addr = inet_addr("127.0.0.1");
     }
     // LAN mode: a non-loopback server means real peers on other machines. Pia
     // then binds all interfaces, advertises this machine's LAN address, sends

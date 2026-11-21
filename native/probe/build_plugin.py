@@ -128,6 +128,20 @@ def test(zig, so):
             home = pathlib.Path(tmp) / "home"
             home.mkdir()
             run([str(seatd), env["MKWMP_TEST_SERVER"], str(home)])
+            # the PS5's HTTP client (plat_http_ps5.c: plain sockets, so it runs here) against awkward answers
+            http = OUT / "linux" / "test_http_ps5"
+            run([zig, "cc", "-target", "x86_64-linux-gnu", "-O1", "-Wall", "-Wextra", "-Werror", "-o", str(http),
+                 str(HERE / "tests" / "test_http_ps5.c"), str(SRC / "plat_http_ps5.c"), str(SRC / "plat_net_posix.c")])
+            cases_port = pathlib.Path(tmp) / "cases-port"
+            cases = subprocess.Popen([sys.executable, "-I", str(HERE / "tests" / "http_cases.py"), str(cases_port)])
+            try:
+                for _ in range(100):
+                    if cases_port.exists() and cases_port.read_text():
+                        break
+                    time.sleep(0.05)
+                run([str(http), f"http://127.0.0.1:{cases_port.read_text()}"])
+            finally:
+                cases.kill()
         finally:
             server.kill()
 

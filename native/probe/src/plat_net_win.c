@@ -55,3 +55,16 @@ long plat_sock_recvv(PlatSock s, PlatIov *v, int n) {
     DWORD got = 0, flags = 0;
     return WSARecv(s, b, (DWORD)n, &got, &flags, NULL, NULL) ? -1 : (long)got;
 }
+
+int plat_resolve_ipv4(const char *host, struct in_addr *out) {
+    if (!host || !*host) return 0;
+    plat_net_init();
+    if (inet_pton(AF_INET, host, out) == 1) return 1;
+    struct addrinfo hints = {0}, *res = NULL;
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host, NULL, &hints, &res) || !res) return 0;
+    *out = ((struct sockaddr_in *)res->ai_addr)->sin_addr;
+    freeaddrinfo(res);
+    return 1;
+}

@@ -53,6 +53,10 @@ enum {
 };
 int plat_net_error(void);
 
+// A host's IPv4 address: a dotted quad as it is, else a name lookup (getaddrinfo; on the PS5 the console's own
+// resolver, plat_net_ps5.c, since the title's C library has no resolver configuration). 1 found, 0 not.
+int plat_resolve_ipv4(const char *host, struct in_addr *out);
+
 // Scatter / gather on a connected socket (WSASend / WSARecv, sendmsg / recvmsg): bytes moved, or -1
 typedef struct { void *base; size_t len; } PlatIov;
 long plat_sock_sendv(PlatSock s, const PlatIov *v, int n);

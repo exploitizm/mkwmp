@@ -1,4 +1,4 @@
-// plat_net.h on Linux (and other POSIX systems).
+// plat_net.h on Linux (and other POSIX systems; the PS5 too, but for its resolver: plat_net_ps5.c).
 #define _GNU_SOURCE
 #include "plat_net.h"
 
@@ -57,3 +57,17 @@ static long msg(PlatSock s, PlatIov *v, int n, int reading) {
 
 long plat_sock_sendv(PlatSock s, const PlatIov *v, int n) { return msg(s, (PlatIov *)v, n, 0); }
 long plat_sock_recvv(PlatSock s, PlatIov *v, int n) { return msg(s, v, n, 1); }
+
+#ifndef __PROSPERO__   // the PS5's is in plat_net_ps5.c
+int plat_resolve_ipv4(const char *host, struct in_addr *out) {
+    if (!host || !*host) return 0;
+    if (inet_pton(AF_INET, host, out) == 1) return 1;
+    struct addrinfo hints = {0}, *res = NULL;
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host, NULL, &hints, &res) || !res) return 0;
+    *out = ((struct sockaddr_in *)res->ai_addr)->sin_addr;
+    freeaddrinfo(res);
+    return 1;
+}
+#endif
