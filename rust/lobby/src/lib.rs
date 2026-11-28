@@ -11,6 +11,7 @@ use std::net::SocketAddr;
 
 mod core;
 pub mod docs;
+pub mod groups;
 pub mod limits;
 pub mod lobbies;
 pub mod msgs;
@@ -52,6 +53,10 @@ pub struct CoreConfig {
     /// Refuse sign-ins without a valid seat ticket (production). Off for local tests,
     /// where the probe sends its development tokens.
     pub require_ticket: bool,
+    /// A game that claims another name than its ticket's: banned (true), or only logged as
+    /// "name spoofing (would ban)" while the rule is watched on real races (false). The server's
+    /// config (`[lobby] ban_enforce`) defaults to false; the library to true.
+    pub ban_enforce: bool,
 }
 
 impl Default for CoreConfig {
@@ -65,6 +70,7 @@ impl Default for CoreConfig {
             token_secret: None,
             ticket_keys: Vec::new(),
             require_ticket: false,
+            ban_enforce: true,
         }
     }
 }
@@ -78,6 +84,26 @@ pub struct RosterEntry {
     pub alive: bool,
     /// Names of the mutual friends that are seated now.
     pub friends: Vec<String>,
+}
+
+/// What a banned player's game is told (the seat server tells its launcher the same).
+pub const BAN_MESSAGE: &str = "This profile is banned from MKWMP servers.";
+/// An address ban ends this long after it was made; a name ban never ends.
+pub const IP_BAN_SECS: f64 = 14.0 * 86_400.0;
+
+/// A ban the Core made (a game claimed another name than its seat ticket's), for the seat server
+/// to keep: [`Core::pending_bans`]. The Core enforces it from the moment it is made.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BanReport {
+    /// The profile name of the seat ticket.
+    pub name: String,
+    /// The address the game was connected from (`None`: loopback, never banned).
+    pub ip: Option<String>,
+    pub reason: String,
+    /// For the admin: what was claimed, where.
+    pub detail: String,
+    /// When (seconds since 1970).
+    pub at: u64,
 }
 
 /// An incoming RPC, as the transport saw its request headers.
@@ -121,5 +147,6 @@ pub mod code {
     pub const NOT_FOUND: u32 = 5;
     pub const PERMISSION_DENIED: u32 = 7;
     pub const FAILED_PRECONDITION: u32 = 9;
+    pub const UNIMPLEMENTED: u32 = 12;
     pub const UNAUTHENTICATED: u32 = 16;
 }

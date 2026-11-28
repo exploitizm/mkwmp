@@ -1,0 +1,198 @@
+<UserControl x:Class="Mkwmp.App.Views.HomePage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:Mkwmp.App.Controls"
+             xmlns:input="clr-namespace:Mkwmp.App.Input"
+             Focusable="False">
+  <!-- DataContext: HomeViewModel. The title of the focused tile (centred above it by the code-behind), the
+       carousel, the session's status with where PLAY goes online beside it (the Nextendo account, or "Sign in with
+       Nextendo to play online"; for an install on MKWMP servers its server, and under it the invitation to Nextendo
+       until it is closed), the dock. The top bar and the hint bar are the shell's. -->
+  <Grid>
+    <!-- The status takes the height it needs (one line; two with the invitation), with the room left shared around
+         it and under the dock in the proportions home always had (a line of 50 in a stage 1080 high). -->
+    <Grid.RowDefinitions>
+      <RowDefinition Height="76" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="0.5*" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="0.65*" />
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="2.15*" />
+    </Grid.RowDefinitions>
+
+    <!-- the title of the tile under the focus: follows the tile, hidden while the focus is elsewhere -->
+    <!-- TitleFade: the overlay animation fades the title in with the tile's focus ring (HomePage.SetOverlayMotion) -->
+    <Grid x:Name="TitleFade" IsHitTestVisible="False">
+      <StackPanel x:Name="TitleHost" Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Bottom" Opacity="0"
+                  IsHitTestVisible="False" DataContext="{Binding SelectedTile}">
+        <StackPanel.RenderTransform>
+          <TranslateTransform x:Name="TitleShift" />
+        </StackPanel.RenderTransform>
+        <c:Icon Data="{Binding IconKey, Converter={StaticResource Conv.Icon}}" Width="36" Height="36" Foreground="{DynamicResource Brush.Accent}" StrokeThickness="2.2" />
+        <TextBlock Text="{Binding Title}" Style="{StaticResource Text.Accent}" FontSize="36" FontWeight="Regular" Margin="12,0,0,0" />
+      </StackPanel>
+    </Grid>
+
+    <c:SmoothScrollViewer x:Name="Carousel" Grid.Row="1" Style="{StaticResource Carousel}" ScrollChanged="OnCarouselScrolled">
+      <!-- centred; scaled down a little when the row is wider than the stage (a 16:10 screen, the wide Play tile
+           of overlay mode): HomePage.FitTiles. The room for the focus ring above and below is padding, inside the
+           scaled element: a layout transform clips what overflows it. -->
+      <ItemsControl x:Name="TilesHost" ItemsSource="{Binding Tiles}" Focusable="False" Margin="110,0" Padding="10,26" HorizontalAlignment="Center">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <StackPanel Orientation="Horizontal" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate>
+            <c:Tile Title="{Binding Title}" Subtitle="{Binding Subtitle}" Badge="{Binding Badge}" Footer="{Binding Footer}" Progress="{Binding Progress}" Alert="{Binding Alert}"
+                    Seed="{Binding Seed}" Icon="{Binding IconKey, Converter={StaticResource Conv.Icon}}"
+                    Image="{Binding Image}" Width="{Binding Width}"
+                    Command="{Binding Command}" GotFocus="OnTileFocus" LostFocus="OnTileBlur" />
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
+    </c:SmoothScrollViewer>
+
+    <!-- the session's status (a click explains what blocks PLAY), then where PLAY goes online -->
+    <StackPanel x:Name="StatusLine" Grid.Row="3" HorizontalAlignment="Center" VerticalAlignment="Center" MinHeight="50">
+     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+      <Button Style="{StaticResource ChromeButton}" Padding="18,10" Command="{Binding StatusCommand}">
+        <StackPanel Orientation="Horizontal">
+          <c:Spinner Width="30" Height="30" Margin="0,0,14,0" Visibility="{Binding IsWorking, Converter={StaticResource Conv.Visible}}" />
+          <Ellipse Width="16" Height="16" Margin="0,2,14,0" VerticalAlignment="Center"
+                   Visibility="{Binding IsSettled, Converter={StaticResource Conv.Visible}}">
+            <Ellipse.Style>
+              <Style TargetType="Ellipse">
+                <Setter Property="Fill" Value="{DynamicResource Brush.TextFaint}" />
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding StatusTone}" Value="good">
+                    <Setter Property="Fill" Value="{DynamicResource Brush.Good}" />
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding StatusTone}" Value="warn">
+                    <Setter Property="Fill" Value="{DynamicResource Brush.Warn}" />
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding StatusTone}" Value="bad">
+                    <Setter Property="Fill" Value="{DynamicResource Brush.Bad}" />
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding StatusTone}" Value="info">
+                    <Setter Property="Fill" Value="{DynamicResource Brush.Accent}" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </Ellipse.Style>
+          </Ellipse>
+          <TextBlock Text="{Binding StatusText}" FontSize="27" FontWeight="SemiBold" MaxWidth="980" TextTrimming="CharacterEllipsis">
+            <TextBlock.Style>
+              <Style TargetType="TextBlock" BasedOn="{StaticResource Text.Base}">
+                <Setter Property="Foreground" Value="{DynamicResource Brush.TextMuted}" />
+                <Style.Triggers>
+                  <DataTrigger Binding="{Binding StatusTone}" Value="good">
+                    <Setter Property="Foreground" Value="{DynamicResource Brush.Good}" />
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding StatusTone}" Value="warn">
+                    <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding StatusTone}" Value="bad">
+                    <Setter Property="Foreground" Value="{DynamicResource Brush.Bad}" />
+                  </DataTrigger>
+                  <DataTrigger Binding="{Binding StatusTone}" Value="info">
+                    <Setter Property="Foreground" Value="{DynamicResource Brush.Accent}" />
+                  </DataTrigger>
+                </Style.Triggers>
+              </Style>
+            </TextBlock.Style>
+          </TextBlock>
+          <c:Icon Data="{StaticResource Icon.ChevronRight}" Width="26" Height="26" Margin="8,2,0,0" StrokeThickness="2.4"
+                  Foreground="{DynamicResource Brush.TextMuted}" Visibility="{Binding HasProblem, Converter={StaticResource Conv.Visible}}" />
+        </StackPanel>
+      </Button>
+
+      <Border Width="1.5" Height="30" Margin="14,0,30,0" Background="{DynamicResource Brush.Rule}"
+              Visibility="{Binding ShowServer, Converter={StaticResource Conv.Visible}}" />
+
+      <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Visibility="{Binding ShowServer, Converter={StaticResource Conv.Visible}}">
+        <c:Icon Width="30" Height="30" Margin="0,0,12,0" StrokeThickness="2" Foreground="{DynamicResource Brush.TextMuted}">
+          <c:Icon.Style>
+            <Style TargetType="c:Icon">
+              <Setter Property="Data" Value="{StaticResource Icon.SignalOff}" />
+              <Style.Triggers>
+                <DataTrigger Binding="{Binding IsServerOnline}" Value="True">
+                  <Setter Property="Data" Value="{StaticResource Icon.Signal}" />
+                </DataTrigger>
+              </Style.Triggers>
+            </Style>
+          </c:Icon.Style>
+        </c:Icon>
+        <TextBlock Text="{Binding ServerText}" Style="{StaticResource Text.Base}" FontSize="24" FontWeight="SemiBold"
+                   Foreground="{DynamicResource Brush.TextMuted}" />
+      </StackPanel>
+
+      <!-- Nextendo Network, signed in: the account PLAY goes online with (a click: Settings › Nextendo) -->
+      <Border Width="1.5" Height="30" Margin="14,0,14,0" Background="{DynamicResource Brush.Rule}"
+              Visibility="{Binding ShowNextendoAccount, Converter={StaticResource Conv.Visible}}" />
+      <Button Style="{StaticResource ChromeButton}" Padding="18,10" Command="{Binding NextendoAccountCommand}"
+              Visibility="{Binding ShowNextendoAccount, Converter={StaticResource Conv.Visible}}">
+        <StackPanel Orientation="Horizontal">
+          <c:Icon Data="{StaticResource Icon.Globe}" Width="30" Height="30" Margin="0,0,12,0" StrokeThickness="2" Foreground="{DynamicResource Brush.Accent}" />
+          <TextBlock Text="{Binding NextendoAccountText}" Style="{StaticResource Text.Base}" FontSize="24" FontWeight="SemiBold"
+                     Foreground="{DynamicResource Brush.Text}" MaxWidth="560" TextTrimming="CharacterEllipsis" />
+          <TextBlock Text="{Binding NextendoFriendCode}" Style="{StaticResource Text.Base}" FontSize="24" Margin="16,0,0,0"
+                     Foreground="{DynamicResource Brush.TextMuted}"
+                     Visibility="{Binding NextendoFriendCode, Converter={StaticResource Conv.Visible}}" />
+        </StackPanel>
+      </Button>
+
+      <!-- Nextendo Network, nobody signed in: PLAY is offline, and this is the way online (the browser, and a card that waits) -->
+      <c:ConsoleButton Kind="Primary" Height="62" MinWidth="0" Padding="28,0" FontSize="25" Margin="22,0,0,0" VerticalAlignment="Center"
+                       Icon="{StaticResource Icon.UserPlus}" Content="{Binding S[home.nextendo.signin]}" Command="{Binding NextendoSignInCommand}" input:FocusNav.IsBanner="True"
+                       Visibility="{Binding ShowNextendoSignIn, Converter={StaticResource Conv.Visible}}" />
+     </StackPanel>
+
+     <!-- an install that plays on MKWMP servers: the invitation to Nextendo Network, until it is closed -->
+     <Border Style="{StaticResource Card}" Padding="26,8,12,8" Margin="0,8,0,0" HorizontalAlignment="Center"
+             Visibility="{Binding ShowNextendoInvite, Converter={StaticResource Conv.Visible}}">
+       <StackPanel Orientation="Horizontal" input:FocusNav.IsGroup="True">
+         <c:Icon Data="{StaticResource Icon.Globe}" Width="40" Height="40" StrokeThickness="1.9" VerticalAlignment="Center" Margin="0,0,20,0"
+                 Foreground="{DynamicResource Brush.Accent}" />
+         <StackPanel VerticalAlignment="Center" MaxWidth="1000" Margin="0,0,26,0">
+           <TextBlock Text="{Binding S[home.invite.title]}" Style="{StaticResource Text.Base}" FontSize="25" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+           <TextBlock Text="{Binding S[home.invite.text]}" Style="{StaticResource Text.Caption}" FontSize="20" LineHeight="26" TextWrapping="NoWrap" TextTrimming="CharacterEllipsis" />
+         </StackPanel>
+         <c:ConsoleButton Kind="Primary" Height="58" MinWidth="0" Padding="26,0" FontSize="25" VerticalAlignment="Center"
+                          Content="{Binding S[nextendo.signin]}" Command="{Binding NextendoSignInCommand}" input:FocusNav.IsBanner="True" />
+         <c:ConsoleButton Kind="Ghost" Height="58" MinWidth="0" Padding="22,0" FontSize="25" Margin="8,0,0,0" VerticalAlignment="Center"
+                          Content="{Binding S[setup.online.not_now]}" Command="{Binding DismissInviteCommand}" input:FocusNav.IsBanner="True" />
+       </StackPanel>
+     </Border>
+    </StackPanel>
+    <Border x:Name="DockHost" Grid.Row="5" Style="{StaticResource Dock}">
+      <StackPanel Orientation="Horizontal">
+        <c:DockButton Icon="{Binding PlayIcon, Converter={StaticResource Conv.Icon}}" Label="{Binding PlayLabel}"
+                      Fill="{DynamicResource Brush.Accent}" Tint="{DynamicResource Brush.OnAccent}" Command="{Binding PlayCommand}" />
+        <!-- over a game that can open its own menu when told to (plugin API 4) -->
+        <c:DockButton Icon="{StaticResource Icon.Menu}" Label="{Binding GameMenuLabel}" Tint="#FF5B5BD6" Command="{Binding GameMenuCommand}"
+                      Visibility="{Binding ShowGameMenu, Converter={StaticResource Conv.Visible}}" />
+
+        <!-- on Nextendo: "Sign in with Nextendo", then the account. On MKWMP servers: Friends; without a server the
+             same button with a lock, to Settings › Online -->
+        <c:DockButton Icon="{Binding FriendsIcon, Converter={StaticResource Conv.Icon}}" Label="{Binding FriendsLabel}" Tint="#FFF08A1A"
+                      HasDot="{Binding HasRequests}" Command="{Binding FriendsCommand}" />
+
+        <c:DockButton Icon="{Binding FullscreenIcon, Converter={StaticResource Conv.Icon}}" Label="{Binding FullscreenLabel}" Tint="#FF0E9DB8"
+                      Command="{Binding FullscreenCommand}"
+                      Visibility="{Binding CanSwitchFullscreen, Converter={StaticResource Conv.Visible}}" />
+
+        <!-- the player's own mods (the store is a card); its dot: an update on GameBanana for one of them -->
+        <c:DockButton Icon="{StaticResource Icon.Package}" Label="{Binding S[home.mods]}" Tint="#FF2F9E5B" Command="{Binding ModsCommand}"
+                      HasDot="{Binding ModsHaveUpdates}" Visibility="{Binding ShowMods, Converter={StaticResource Conv.Visible}}" />
+        <c:DockButton Icon="{StaticResource Icon.Settings}" Label="{Binding S[home.settings]}" Command="{Binding SettingsCommand}" />
+        <!-- over a game: ends the game itself (it asks first), not only the launcher -->
+        <c:DockButton Icon="{StaticResource Icon.Exit}" Label="{Binding S[home.overlay.quit]}" Tint="#FFE5484D" Command="{Binding QuitGameCommand}"
+                      Visibility="{Binding ShowQuitGame, Converter={StaticResource Conv.Visible}}" />
+        <c:DockButton Icon="{StaticResource Icon.Power}" Label="{Binding S[home.power]}" Command="{Binding PowerCommand}" />
+      </StackPanel>
+    </Border>
+  </Grid>
+</UserControl>

@@ -14,6 +14,11 @@ by the same author, GPL-3.0. The changes are: the log goes to the probe instead 
 there are 24 seats, and the mix has a per-talker leveler and a limiter (`voice_loudness.h`).
 `voice_wire.h`, `mkwmp_voice.*` and `voice_loudness.h` are mkwmp's own code.
 
+`native/probe/src/ingame/` (the launcher's toasts and its overlay page drawn in the game's own frames) is ported
+from Infinity's overlay (`overlay/src/v4/`: `toasts_v4.cpp`, `overlay_v4.cpp`, `kit_v4.*`, `toast_model.h`,
+`overlay_model.h`), by the same author, GPL-3.0. The changes are: it draws through mkw-recomp's plugin API instead of a
+DXGI hook, talks to the MKWMP launcher with the mod's own HTTP, and its page has MKWMP's panes (Game, Current Lobby).
+
 ## Third-party components
 
 | Component | Where | License |
@@ -22,6 +27,8 @@ there are 24 seats, and the mix has a per-talker leveler and a limiter (`voice_l
 | RNNoise 0.2 (Xiph.Org, Mozilla, Jean-Marc Valin) | compiled into `mkwmp-voice.dll` / `libmkwmp-voice.so` | BSD-3-Clause |
 | WebRTC AudioProcessing 2.1, AEC3 (The WebRTC project authors; freedesktop's standalone release) | compiled into `mkwmp-voice.dll` / `libmkwmp-voice.so` | BSD-3-Clause, plus Google's additional IP rights grant (patents) |
 | Abseil 20240722.0 (headers only) | compiled into `mkwmp-voice.dll` / `libmkwmp-voice.so` | Apache-2.0 |
+| Dear ImGui 1.91.8 (Omar Cornut and contributors) | compiled into `mkwmp.dll` / `mkwmp.so` (`native/probe/third_party/imgui`, unmodified) | MIT (`native/probe/third_party/imgui/LICENSE.txt`) |
+| Nunito font (The Nunito Project Authors) | embedded in `mkwmp.dll` / `mkwmp.so` (`native/probe/third_party/fonts`, unmodified) | SIL Open Font License 1.1 (`native/probe/third_party/fonts/Nunito-LICENSE.txt`) |
 | Press Start 2P font (The Press Start 2P Project Authors) | embedded in the launcher | SIL Open Font License 1.1 (`rust/client/assets/PressStart2P-OFL.txt`) |
 | Rust crates (eframe/egui, tokio, axum, reqwest, rustls, ed25519-dalek, serde and others) | the launcher and the server | MIT and/or Apache-2.0 (each crate's own license; `cargo about` / `Cargo.lock` lists them) |
 
@@ -29,5 +36,42 @@ The third-party sources are fetched by `native/voice/fetch.ps1` (or `fetch.py`) 
 tarballs, pinned by SHA-256. Each tarball's own `COPYING`/`LICENSE` carries the full license text.
 The release zip includes those texts under `licenses/`.
 
-Mario Kart World is Nintendo's. mkwmp ships none of the game's code or assets, and it is not
-affiliated with or endorsed by Nintendo.
+## mkw-recomp
+
+Built on mkw-recomp by Adrià (github.com/adriadam10/mkw-recomp), MIT.
+
+The MKWMP launcher downloads and installs mkw-recomp 0.1.15-mkwmp
+(https://github.com/anarqz/mkw-recomp, tag v0.1.15-mkwmp), MKWMP's fork of mkw-recomp by Adrià
+(https://github.com/adriadam10/mkw-recomp), and runs its game setup. mkw-recomp is under the MIT
+License; its notice is below, is installed as `licenses/mkw-recomp-LICENSE` with the notices of
+the libraries it ships, and is shown in the launcher under About > Licenses. The fork adds entries
+to the plugin API and changes nothing else of the game's behaviour. mkw-recomp contains no game
+code or assets: it builds the game on the player's device from the player's own copy. MKWMP is not
+affiliated with or endorsed by mkw-recomp's author or by the game's publisher.
+
+```
+MIT License
+
+Copyright (c) 2026 Adrià
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+MKW belongs to its owner. mkwmp ships none of the game's code or assets, and it is not
+affiliated with or endorsed by the game's publisher.

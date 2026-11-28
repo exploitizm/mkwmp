@@ -9,7 +9,7 @@ the game's own menus.
 
 Owners:
 
-- voice relay (UDP, inside `mkwmp lobby` / `mkwmp host`), launcher settings and the local API
+- voice relay (UDP, inside `server lobby` / `server host`), launcher settings and the local API
   endpoints below: MACBOOK-MKWMP (`rust/gateway`, `rust/mkwmp`, `rust/client`);
 - room membership (`lobby::Core::voice_room`), the probe and the voice engine
   (`native/voice`, `mkwmp-voice.dll`; on Linux `libmkwmp-voice.so`): WINDOWS-MKWMP.
@@ -82,7 +82,7 @@ a seat for it and none of its voice is forwarded.
 | --- | --- |
 | `GET /local/v1/voice` | `200 {"enabled":true,"input":"<device id or empty>","output":"<device id or empty>","inputGain":100,"outputGain":100,"mutes":[{"account":"<u64 decimal>","name":"..."}]}`. Polled by the probe every 2 s; a change applies live. |
 | `POST /local/v1/voice/devices` | `{"inputs":[{"id","name"}],"outputs":[{"id","name"}]}` as the game process sees them: on Windows WASAPI endpoint ids and friendly names; on Linux (PulseAudio, or PipeWire through pipewire-pulse) the PulseAudio source and sink names as ids and their descriptions as names (inputs: every source that is not a monitor; outputs: every sink; see §5.1). The launcher keeps the last list (persisted) for its settings pane. `204`. |
-| `POST /local/v1/voice/mute` | `{"account":"<u64 decimal>","name":"...","muted":true}`: a mute from the game's menus. The launcher persists the list (by account id) and returns it in the next GET. `204`. |
+| `POST /local/v1/voice/mute` | `{"account":"<u64 decimal>","name":"...","muted":true}`: a mute (up to 1.4.2 the mod sent it from its in-game mute menu, which is gone; kept for compatibility). The launcher persists the list (by account id) and returns it in the next GET. `204`. |
 
 Settings pane (launcher SETTINGS): **Voice chat** on/off (default **on**), **Microphone** and
 **Output** dropdowns ("System default" first = empty id, then the devices the game reported; before
@@ -99,7 +99,11 @@ the first game run only "System default"), mic and voice volume sliders 1-100 (d
   normalization** (each talker brought to -20 dBFS speech level, -12..+12 dB, slow attack, no
   pumping), per-talker gain, mix, **mix limiter** (hard ceiling -3 dBFS, soft knee): nobody sounds
   louder than anyone else and no scream reaches the ears at full scale.
-- Mutes from the game's menus go to the relay (op 2) and to the launcher (`POST /voice/mute`).
+- The mute list of the settings (`GET /voice` `mutes`) goes to the relay (op 2). Since 1.4.3 the mod draws
+  nothing into the game: no talking or muted marks next to the players, no mute toggle in the pause menu, no
+  in-game hotkeys. `POST /voice/mute` stays in the contract (the launcher and the mod's in-process local API
+  still answer it), but the mod no longer sends it; a player can unmute from the Muted Players list, and there is
+  no per-player mute control in the game any more.
 
 ### 5.1 Linux (PulseAudio / PipeWire)
 
@@ -130,6 +134,29 @@ is the same on both platforms.
 Voice and camera work only in **friend rooms**, the private rooms players create or join under
 ONLINE → FRIENDS. Joining one is the player's choice to talk to the people in it. Matchmade races
 and battles have no voice and no camera.
+
+**When the devices are open (1.4.1).** The microphone, the audio output and the webcam are opened
+only in a friend room, and closed when the player leaves it:
+
+- **Microphone and output**: the voice engine (`mkwmp-voice.dll`) runs only while voice is on in
+  the launcher's settings, the probe is online, and the relay's state down says the player is in a
+  room with voice (`room` bit 0; with a ver-2 relay in room mode, also a non-zero `room_id`). The
+  relay gives that only in a friend room past Gathering. It stops at once on leaving the room, when
+  the relay is silent for 10 s, when voice is turned off, on leaving online play, and when the game
+  closes. Turning room mode on drops the old state, so no stale "in a room" opens the microphone.
+- **Webcam**: opened only when the player's camera is on, the game streams the local camera, and
+  the player is in a friend room (the relay's `room_id`). The game's "Use the camera?" prompt at
+  Online Play is answered without opening it. Closed within about 0.75 s of leaving the room or
+  going offline, and at once when the game closes.
+- **Never**: at game start, in the menus, in a matchmade lobby or race, or in single player.
+  `mkwmp-voice.dll` is not even loaded before Online Play.
+- **Device lists** (names only, nothing opened): the game sends its audio devices to the launcher
+  only while the engine runs in a voice room (first then, then every 30 s). The cameras are listed
+  only while the mod's Camera settings are on screen.
+- **The launcher** never opens a voice or camera session. Its mic test opens the microphone only
+  while the test switch is on, and its camera test only while the Test Camera page is shown. Both
+  stop when the page is left, the window loses the focus, or the overlay goes back to the game.
+  Devices are listed only on Voice & Camera, and the cameras only when one is picked or tested.
 
 - **Voice: everyone in the room hears everyone** (rule 3.3: mutes and deafen as before). The
   room is the friend room the lobby has the player in (§1), nothing else. A released client

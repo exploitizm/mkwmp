@@ -25,6 +25,8 @@ struct World {
     core: Core,
     clock: Arc<AtomicU64>, // milliseconds
     next: AtomicU64,
+    /// The address a connection comes from (default: loopback).
+    peers: std::sync::Mutex<std::collections::HashMap<u64, SocketAddr>>,
 }
 
 impl World {
@@ -32,7 +34,14 @@ impl World {
         let clock = Arc::new(AtomicU64::new(1_800_000_000_000));
         let c = clock.clone();
         let core = Core::with_clock(CoreConfig::default(), policy, Arc::new(move || c.load(Ordering::SeqCst) as f64 / 1000.0));
-        Self { core, clock, next: AtomicU64::new(1) }
+        Self { core, clock, next: AtomicU64::new(1), peers: Default::default() }
+    }
+
+    fn with_config(cfg: CoreConfig) -> Self {
+        let clock = Arc::new(AtomicU64::new(1_800_000_000_000));
+        let c = clock.clone();
+        let core = Core::with_clock(cfg, Policy::default(), Arc::new(move || c.load(Ordering::SeqCst) as f64 / 1000.0));
+        Self { core, clock, next: AtomicU64::new(1), peers: Default::default() }
     }
 
     fn advance(&self, secs: f64) {
@@ -48,7 +57,7 @@ impl World {
     fn call(&self, conn: u64, path: &str, bearer: Option<&str>, body: Option<&[u8]>, close: bool) -> (u64, UnboundedReceiver<Out>) {
         let (tx, rx) = unbounded_channel();
         let stream = self.id();
-        let peer: SocketAddr = "127.0.0.1:5000".parse().unwrap();
+        let peer: SocketAddr = self.peers.lock().unwrap().get(&conn).copied().unwrap_or("127.0.0.1:5000".parse().unwrap());
         self.core.open(&Call { conn, stream, path, authority: "x", bearer, peer }, tx);
         if let Some(b) = body {
             self.core.message(conn, stream, b);
@@ -112,14 +121,23 @@ struct Player {
 }
 
 fn sign_in(w: &World, seat_token: &str) -> Player {
-    let conn = w.id();
+    sign_in_from(w, seat_token, None).unwrap()
+}
+
+/// Sign in from `ip` (None: loopback); the gRPC status when refused.
+fn sign_in_from(w: &World, seat_token: &str, ip: Option<&str>) -> Result<Player, u32> {
+    let (conn, gs_conn) = (w.id(), w.id());
+    if let Some(ip) = ip {
+        let peer: SocketAddr = format!("{ip}:5000").parse().unwrap();
+        w.peers.lock().unwrap().extend([(conn, peer), (gs_conn, peer)]);
+    }
     let body = Msg::new().bytes(1, "tenants/t-test").msg(3, &Msg::new().bytes(1, seat_token)).into_bytes();
-    let reply = w.unary(conn, SIGN_IN, None, &body).unwrap();
+    let reply = w.unary(conn, SIGN_IN, None, &body)?;
     let token = wire::bytes_field(&reply, 2).unwrap().unwrap();
     let user = wire::str_field(token, 1).unwrap().unwrap();
     let access = wire::str_field(token, 2).unwrap().unwrap();
     let uid = user.rsplit('/').next().unwrap().to_owned();
-    Player { conn, gs_conn: w.id(), user, uid, token: access, ticket: String::new(), track: None, kus: None }
+    Ok(Player { conn, gs_conn, user, uid, token: access, ticket: String::new(), track: None, kus: None })
 }
 
 fn search(w: &World, p: &mut Player, mode: &str) {
@@ -256,6 +274,17 @@ fn two_players_match_play_and_leave() {
     assert_eq!(doc.get("p2p_sid"), Some(&Value::Int(77)));
     assert_eq!(doc.get("vehicle"), Some(&Value::Int(5)));
 
+    // Nobody writes another member's PlayerStatic (the name and station others see) nor the server's __us.
+    write(&w, &b, &ps, Fields::new().with("name", Value::str("impostor")).with("p2p_sid", Value::Int(1)), None);
+    let doc = get(&w, &b, &ps).unwrap();
+    assert_eq!(doc.get("p2p_sid"), Some(&Value::Int(77)), "B's write to A's PlayerStatic is refused");
+    assert!(doc.get("name").is_none());
+    let us_a = format!("docs/__us/{ussid_a}");
+    write(&w, &b, &us_a, Fields::new().with("uid", Value::str("forged")).with("st", Value::Int(0)), None);
+    write(&w, &a, &us_a, Fields::new().with("uid", Value::str("forged")).with("st", Value::Int(0)), None);
+    assert!(get(&w, &a, &us_a).and_then(|d| d.get("uid").and_then(Value::as_str).map(str::to_owned)).as_deref() != Some("forged"), "__us is the server's");
+    assert!(changes(&pushes(&mut a)).iter().all(|c| c.2 != us_a), "a refused write publishes nothing");
+
     // Referee: open, merge reports, final only after both reported.
     send_frame(&w, &mut a, Msg::new().bytes(1, "userSessions/current").msg(3, &listen(5, true, "docs/@@RefereeResult")));
     let request = Fields::new()
@@ -375,7 +404,8 @@ fn launcher_names_replace_in_game_names() {
     let ussid = ussid_of(&join_session(&w, &mut a));
     join_session(&w, &mut b);
     let ps = format!("docs/PlayerStatic/{ussid}");
-    write(&w, &a, &ps, Fields::new().with("name", Value::str("Local")), Some(&["name"]));
+    // The game writes the launcher's name (its own spelling of it); others see the registered one.
+    write(&w, &a, &ps, Fields::new().with("name", Value::str("ana")), Some(&["name"]));
     assert_eq!(get(&w, &b, &ps).unwrap().get("name"), Some(&Value::str("Ana")));
 }
 
@@ -388,7 +418,7 @@ fn production_requires_a_valid_seat_ticket() {
         ..CoreConfig::default()
     };
     let core = Core::with_clock(cfg, Policy::default(), Arc::new(|| 1_800_000_000.0));
-    let w = World { core, clock: Arc::new(AtomicU64::new(0)), next: AtomicU64::new(1) };
+    let w = World { core, clock: Arc::new(AtomicU64::new(0)), next: AtomicU64::new(1), peers: Default::default() };
     let sign = |token: &str| {
         let body = Msg::new().bytes(1, "tenants/t").msg(3, &Msg::new().bytes(1, token)).into_bytes();
         w.unary(w.id(), SIGN_IN, None, &body)
@@ -742,4 +772,362 @@ fn friend_rooms_stay_with_their_game_version() {
     assert!(w.unary(new.conn, &format!("{GSS}GetGameSessionShortAlias"), Some(&new.token), &lookup).is_ok(), "unknown version: allowed");
     assert!(join(&new, true).is_ok());
     assert_eq!(listed(&new), 1);
+}
+
+const REFRESH: &str = "/nn.npln.auth.v1.Auth/RefreshToken";
+
+/// Issue #15: the game refreshes its NPLN token ~58 min after signing in, on a new connection, and
+/// aborts (NN_ABORT) unless the answer's Token.user parses as "tenants/<t>/users/<u>".
+#[test]
+fn token_refresh_answers_a_token_for_the_same_user() {
+    let w = World::new(Policy::default());
+    let conn = w.id();
+    let body = Msg::new().bytes(1, "tenants/t-test").msg(3, &Msg::new().bytes(1, dev_ticket("Ana"))).into_bytes();
+    let reply = w.unary(conn, SIGN_IN, None, &body).unwrap();
+    let token = wire::bytes_field(&reply, 2).unwrap().unwrap();
+    let user = wire::str_field(token, 1).unwrap().unwrap();
+    let refresh = wire::str_field(token, 3).unwrap().unwrap();
+    assert!(!refresh.starts_with("mkwmp-local-refresh-token"), "the refresh token proves the user");
+
+    // 58 minutes later, a new connection, no bearer, the refresh token in the request.
+    w.advance(58.0 * 60.0);
+    let req = Msg::new().bytes(1, &user).bytes(2, &refresh).into_bytes();
+    let reply = w.unary(w.id(), REFRESH, None, &req).expect("refreshed");
+    let t = wire::bytes_field(&reply, 2).unwrap().expect("a Token in field 2");
+    assert_eq!(wire::str_field(t, 1).unwrap().unwrap(), user, "Token.user = tenants/<t>/users/<u>");
+    let access = wire::str_field(t, 2).unwrap().unwrap();
+    assert!(!access.is_empty() && !wire::str_field(t, 3).unwrap().unwrap().is_empty());
+
+    // The new access token works as a bearer: a refresh proven by it alone.
+    let reply = w.unary(w.id(), REFRESH, Some(&access), &[]).expect("bearer refresh");
+    assert_eq!(wire::str_field(wire::bytes_field(&reply, 2).unwrap().unwrap(), 1).unwrap().unwrap(), user);
+
+    // No proof, the old guessable token, or a forged one: refused, never an empty OK.
+    assert_eq!(w.unary(w.id(), REFRESH, None, &[]), Err(16));
+    let old = Msg::new().bytes(2, "mkwmp-local-refresh-token-1").into_bytes();
+    assert_eq!(w.unary(w.id(), REFRESH, None, &old), Err(16));
+    let forged = Msg::new().bytes(2, format!("{refresh}x")).into_bytes();
+    assert_eq!(w.unary(w.id(), REFRESH, None, &forged), Err(16));
+}
+
+#[test]
+fn known_empty_calls_stay_ok_and_unknown_ones_are_unimplemented() {
+    let w = World::new(Policy::default());
+    let p = sign_in(&w, &dev_ticket("Bia"));
+    assert_eq!(w.unary(p.conn, "/nn.npln.friends.v1.Friends/ActivateUser", Some(&p.token), &[]), Ok(Vec::new()));
+    assert_eq!(w.unary(p.conn, "/nn.npln.auth.v1.Auth/ValidateToken", Some(&p.token), &[]), Ok(Vec::new()));
+    assert_eq!(w.unary(p.conn, "/nn.npln.auth.v1.Auth/RefreshAnonymousUserToken", Some(&p.token), &[]), Err(12));
+}
+
+const DELEGATION: &str = "/nn.npln.matchmaking.v1.GameSessionService/IssueUserDelegationToken";
+/// A follower's IssueUserDelegationToken: request {1 parent, 2 user, 3 user, 5 packed actions}.
+fn delegate(w: &World, follower: &Player, leader_user: &str) -> Vec<u8> {
+    let body = Msg::new()
+        .bytes(1, "tenants/current")
+        .bytes(2, &follower.user)
+        .bytes(3, leader_user)
+        .bytes(5, [1u8])
+        .into_bytes();
+    w.unary(follower.conn, DELEGATION, Some(&follower.token), &body).expect("delegation answered")
+}
+
+#[test]
+fn delegation_reply_has_the_shape_the_game_parses() {
+    let w = World::new(Policy::default());
+    let ana = sign_in(&w, &dev_ticket("Ana"));
+    let bia = sign_in(&w, &dev_ticket("Bia"));
+    let reply = delegate(&w, &bia, &ana.user);
+    let t = wire::bytes_field(&reply, 1).unwrap().expect("1: UserDelegationToken");
+    assert_eq!(wire::str_field(t, 1).unwrap().as_deref(), Some(bia.user.as_str()), "echo of request 2");
+    assert_eq!(wire::str_field(t, 2).unwrap().as_deref(), Some(ana.user.as_str()), "echo of request 3");
+    assert_eq!(wire::bytes_field(t, 4).unwrap(), Some(&[1u8][..]), "packed actions [1]");
+    assert!(wire::str_field(t, 5).unwrap().unwrap().starts_with("mkwmp-delegation-"));
+    let d = wire::bytes_field(t, 6).unwrap().unwrap();
+    assert_eq!(wire::varint_field(d, 1).unwrap(), Some(12 * 3600));
+    // A malformed user resource is never echoed (the game aborts on one).
+    let body = Msg::new().bytes(2, "nonsense").bytes(3, &ana.user).into_bytes();
+    let reply = w.unary(bia.conn, DELEGATION, Some(&bia.token), &body).unwrap();
+    let t = wire::bytes_field(&reply, 1).unwrap().unwrap();
+    assert_eq!(wire::str_field(t, 1).unwrap(), None);
+    // Not signed in: refused, never an empty OK.
+    assert_eq!(w.unary(w.id(), DELEGATION, None, &body), Err(16));
+}
+
+fn lobby_name(p: &mut Player) -> String {
+    assignment(p).expect("assigned").0
+}
+
+#[test]
+fn a_follower_lands_in_its_leaders_lobby_and_follows_it_to_the_next() {
+    let mut policy = Policy::default();
+    policy.min_start = 1;
+    policy.gather_secs = 0.0;
+    policy.join_window_secs = 600.0;
+    let w = World::new(policy);
+    let mut ana = sign_in(&w, &dev_ticket("Ana"));
+    let mut bia = sign_in(&w, &dev_ticket("Bia"));
+    delegate(&w, &bia, &ana.user); // Bia follows Ana
+    search(&w, &mut ana, "Normal24");
+    let first = lobby_name(&mut ana);
+    search(&w, &mut bia, "Normal24");
+    assert_eq!(lobby_name(&mut bia), first, "the follower joins the leader's lobby");
+
+    // The leader moves on: a new search ends the old seat; the follower follows to the new lobby.
+    w.advance(1.0);
+    search(&w, &mut ana, "Battle24");
+    let second = lobby_name(&mut ana);
+    assert_ne!(second, first);
+    search(&w, &mut bia, "Battle24");
+    assert_eq!(lobby_name(&mut bia), second, "the follower follows the leader");
+}
+
+#[test]
+fn a_leaders_ticket_with_the_token_binds_the_follower() {
+    let mut policy = Policy::default();
+    policy.min_start = 1;
+    policy.gather_secs = 0.0;
+    policy.join_window_secs = 600.0;
+    let w = World::new(policy);
+    let mut ana = sign_in(&w, &dev_ticket("Ana"));
+    let mut bia = sign_in(&w, &dev_ticket("Bia"));
+    // A delegation that names no leader binds nobody yet...
+    let body = Msg::new().bytes(2, "tenants/current/users/current").bytes(5, [1u8]).into_bytes();
+    let reply = w.unary(bia.conn, DELEGATION, Some(&bia.token), &body).unwrap();
+    let token = wire::str_field(wire::bytes_field(&reply, 1).unwrap().unwrap(), 5).unwrap().unwrap();
+    // ...until the leader's ticket carries it (CreateMatchmakingTicket field 3).
+    let player = Msg::new().bytes(1, "tenants/current/users/current").bytes(2, "attrs");
+    let body = Msg::new()
+        .msg(2, &Msg::new().bytes(2, "tenants/current/matchmakingConfigs/Normal24").msg(4, &player))
+        .bytes(3, &token)
+        .into_bytes();
+    let reply = w.unary(ana.conn, CREATE, Some(&ana.token), &body).unwrap();
+    let name = wire::str_field(&reply, 1).unwrap().unwrap();
+    ana.ticket = format!("tenants/current/matchmakingTickets/{}", name.rsplit('/').next().unwrap());
+    let (_, rx) = w.call(ana.conn, TRACK, Some(&ana.token), Some(&Msg::new().bytes(1, &ana.ticket).into_bytes()), true);
+    ana.track = Some(rx);
+    let first = lobby_name(&mut ana);
+    search(&w, &mut bia, "Normal24");
+    assert_eq!(lobby_name(&mut bia), first);
+}
+
+#[test]
+fn a_companion_document_binds_and_unbinds() {
+    let mut policy = Policy::default();
+    policy.min_start = 1;
+    policy.gather_secs = 0.0;
+    policy.join_window_secs = 600.0;
+    let w = World::new(policy);
+    let mut ana = sign_in(&w, &dev_ticket("Ana"));
+    let mut bia = sign_in(&w, &dev_ticket("Bia"));
+    let companion = |state: i64, leader: &str| {
+        let mut f = Fields::default();
+        f.set("companion_state", Value::Int(state));
+        f.set("leader_user_id", Value::str(leader));
+        f
+    };
+    // Bia (not yet seated: its own solo space) says it follows Ana.
+    write(&w, &bia, "docs/Companion/2", companion(3, &ana.uid), None);
+    search(&w, &mut ana, "Normal24");
+    let first = lobby_name(&mut ana);
+    search(&w, &mut bia, "Normal24");
+    assert_eq!(lobby_name(&mut bia), first);
+    // State 0: no follower any more (the group is over; placement is normal again).
+    write(&w, &bia, "docs/Companion/2", companion(0, ""), None);
+}
+
+// ---- bans for name spoofing ------------------------------------------------------------------
+
+const BANNED: u32 = lobby::code::PERMISSION_DENIED;
+
+fn try_write(w: &World, p: &Player, name: &str, fields: Fields) -> Result<Vec<u8>, u32> {
+    let body = Msg::new().msg(1, &Msg::new().msg(1, &Msg::new().msg(1, &Msg::new().bytes(1, name).msg(2, &fields.encode())))).into_bytes();
+    w.unary(p.gs_conn, WRITE, Some(&p.token), &body)
+}
+
+fn name_field(name: &str) -> Fields {
+    Fields::new().with("name", Value::str(name)).with("play_history_key", Value::Bytes(vec![7; 8]))
+}
+
+/// Two players matched and in their session, both listening to the member list and PlayerStatic.
+fn matched(w: &World, a: &mut Player, b: &mut Player) -> (i64, i64) {
+    search(w, a, "Battle24");
+    search(w, b, "Battle24");
+    w.advance(11.0);
+    assignment(a).expect("assigned");
+    assignment(b).expect("assigned");
+    let (ua, ub) = (ussid_of(&join_session(w, a)), ussid_of(&join_session(w, b)));
+    for p in [a, b] {
+        send_frame(w, p, Msg::new().bytes(1, "userSessions/current").msg(3, &listen(2, true, "docs/__us")));
+        send_frame(w, p, Msg::new().bytes(1, "userSessions/current").msg(3, &listen(4, true, "docs/PlayerStatic")));
+    }
+    (ua, ub)
+}
+
+#[test]
+fn with_bans_off_a_claimed_name_is_only_logged_and_replaced() {
+    let w = World::with_config(CoreConfig { ban_enforce: false, ..CoreConfig::default() });
+    let mut ana = sign_in_from(&w, &dev_ticket("Ana"), Some("203.0.113.1")).unwrap();
+    let mut bia = sign_in_from(&w, &dev_ticket("Bia"), Some("203.0.113.2")).unwrap();
+    let (_, ussid_b) = matched(&w, &mut ana, &mut bia);
+    let ps = format!("docs/PlayerStatic/{ussid_b}");
+    pushes(&mut ana);
+    try_write(&w, &bia, &ps, name_field("Ana")).expect("not refused");
+    try_write(&w, &bia, &ps, name_field("Local")).expect("not refused");
+    assert!(w.core.pending_bans().is_empty(), "nothing for the seat server");
+    assert_eq!(get(&w, &ana, &ps).unwrap().get("name").and_then(Value::as_str), Some("Bia"), "others still see the ticket's name");
+    let c = changes(&pushes(&mut ana));
+    assert!(c.iter().all(|c| c.1 != ChangeKind::Removed as u64), "nobody leaves: {c:?}");
+    assert_eq!(w.core.counts()["Battle24"].players, 2);
+    assert!(sign_in_from(&w, &dev_ticket("Bia"), Some("203.0.113.2")).is_ok(), "name and address still sign in");
+}
+
+#[test]
+fn a_game_claiming_another_name_is_banned_and_dropped_at_once() {
+    let w = World::new(Policy::default());
+    let mut ana = sign_in_from(&w, &dev_ticket("Ana"), Some("203.0.113.1")).unwrap();
+    let mut bia = sign_in_from(&w, &dev_ticket("Bia"), Some("203.0.113.2")).unwrap();
+    let (_, ussid_b) = matched(&w, &mut ana, &mut bia);
+    let ps = format!("docs/PlayerStatic/{ussid_b}");
+
+    // Its own name, as the unmodified game writes it: stored, nobody banned.
+    try_write(&w, &bia, &ps, name_field("Bia")).unwrap();
+    assert_eq!(get(&w, &ana, &ps).unwrap().get("name").and_then(Value::as_str), Some("Bia"));
+    assert!(w.core.pending_bans().is_empty());
+    pushes(&mut ana);
+
+    // Another name: refused, banned, and gone from the lobby without the reconnect grace.
+    assert_eq!(try_write(&w, &bia, &ps, name_field("Ana")), Err(BANNED));
+    let c = changes(&pushes(&mut ana));
+    let removed = |name: &str| c.iter().any(|c| c.1 == ChangeKind::Removed as u64 && c.2 == name);
+    assert!(removed(&format!("docs/__us/{ussid_b}")) && removed(&ps), "the others see the member and its documents removed: {c:?}");
+    assert!(c.iter().all(|c| c.3.get("name").and_then(Value::as_str) != Some("Ana")), "the claimed name reached nobody");
+    assert_eq!(w.core.counts()["Battle24"].players, 1);
+    assert!(get(&w, &ana, &ps).is_none());
+    // Its streams ended, its tokens are dead, the name and the address can't sign in.
+    let ended = drain(&mut bia.kus.as_mut().unwrap().1);
+    assert!(ended.iter().any(|o| matches!(o, Out::End { grpc_status: BANNED, message: Some(m) } if m == lobby::BAN_MESSAGE)), "{ended:?}");
+    let player = Msg::new().bytes(1, "tenants/current/users/current").bytes(2, "attrs");
+    let ticket = Msg::new().msg(2, &Msg::new().bytes(2, "tenants/current/matchmakingConfigs/Battle24").msg(4, &player)).into_bytes();
+    assert_eq!(w.unary(bia.conn, CREATE, Some(&bia.token), &ticket), Err(BANNED));
+    assert_eq!(w.unary(w.id(), CREATE, Some(&bia.token), &ticket), Err(BANNED), "on a new connection too");
+    assert!(w.core.voice_user(&dev_ticket("Bia")).is_none());
+    assert_eq!(sign_in_from(&w, &dev_ticket("bia"), Some("198.51.100.9")).err(), Some(BANNED), "the name, from anywhere");
+    assert_eq!(sign_in_from(&w, &dev_ticket("Cid"), Some("203.0.113.2")).err(), Some(BANNED), "the address, under any name");
+    assert!(sign_in_from(&w, &dev_ticket("Cid"), Some("203.0.113.3")).is_ok());
+
+    // What the seat server is told, once.
+    let pending = w.core.pending_bans();
+    assert_eq!(pending.len(), 1);
+    assert_eq!((pending[0].name.as_str(), pending[0].ip.as_deref(), pending[0].reason.as_str()), ("Bia", Some("203.0.113.2"), "name spoofing"));
+    assert!(pending[0].detail.contains("\"Ana\""), "{}", pending[0].detail);
+
+    w.core.bans_delivered(&pending);
+    assert!(w.core.pending_bans().is_empty());
+    assert_eq!(sign_in_from(&w, &dev_ticket("Bia"), Some("198.51.100.9")).err(), Some(BANNED), "delivered: still enforced here");
+
+    // The seat server's list is what holds from then on: the address for 14 days, the name for good.
+    let at = pending[0].at;
+    w.core.set_bans(&["bia".into()], &[("203.0.113.2".into(), at + 14 * 86_400)]);
+    assert_eq!(sign_in_from(&w, &dev_ticket("Bia"), Some("198.51.100.9")).err(), Some(BANNED));
+    w.advance(14.0 * 86_400.0 - 60.0);
+    assert_eq!(sign_in_from(&w, &dev_ticket("Cid"), Some("203.0.113.2")).err(), Some(BANNED), "day 13: still banned");
+    w.advance(120.0);
+    assert!(sign_in_from(&w, &dev_ticket("Cid"), Some("203.0.113.2")).is_ok(), "the address ban ended");
+    assert_eq!(sign_in_from(&w, &dev_ticket("Bia"), Some("203.0.113.2")).err(), Some(BANNED), "the name ban never ends");
+    // ...until the admin lifts it.
+    w.core.set_bans(&[], &[]);
+    assert!(sign_in_from(&w, &dev_ticket("Bia"), Some("203.0.113.2")).is_ok());
+}
+
+#[test]
+fn a_ban_from_the_seat_server_drops_a_connected_player() {
+    let w = World::new(Policy::default());
+    let mut ana = sign_in(&w, &dev_ticket("Ana"));
+    let mut bia = sign_in(&w, &dev_ticket("Bia"));
+    let (_, ussid_b) = matched(&w, &mut ana, &mut bia);
+    pushes(&mut ana);
+    w.core.set_bans(&["BIA".into()], &[]);
+    let c = changes(&pushes(&mut ana));
+    assert!(c.iter().any(|c| c.1 == ChangeKind::Removed as u64 && c.2 == format!("docs/__us/{ussid_b}")), "{c:?}");
+    assert!(drain(&mut bia.kus.as_mut().unwrap().1).iter().any(|o| matches!(o, Out::End { grpc_status: BANNED, .. })));
+    assert!(w.core.pending_bans().is_empty(), "nothing to report back");
+}
+
+#[test]
+fn own_names_legacy_users_and_refused_documents_ban_nobody() {
+    let w = World::new(Policy::default());
+    let mut dev = sign_in(&w, "dev"); // a local test user: no ticket, no registered name
+    let mut ana = sign_in(&w, &dev_ticket("Ana"));
+    let (ussid_d, ussid_a) = matched(&w, &mut dev, &mut ana);
+    assert_ne!(ussid_a, ussid_d);
+    let (ps_a, ps_d) = (format!("docs/PlayerStatic/{ussid_a}"), format!("docs/PlayerStatic/{ussid_d}"));
+    for own in ["Ana", "ana", "ANA", "  Ana ", ""] {
+        try_write(&w, &ana, &ps_a, name_field(own)).unwrap();
+        assert_eq!(get(&w, &dev, &ps_a).unwrap().get("name").and_then(Value::as_str), Some("Ana"), "claimed {own:?}");
+    }
+    // Without a name in it, and in other documents: nothing to compare.
+    try_write(&w, &ana, &ps_a, Fields::new().with("p2p_sid", Value::Int(7))).unwrap();
+    try_write(&w, &ana, &format!("docs/Companion/{ussid_a}"), Fields::new().with("name", Value::str("Zed"))).unwrap();
+    // Another member's PlayerStatic: refused as before (may_write), not a name claimed for oneself.
+    try_write(&w, &ana, &ps_d, name_field("Zed")).unwrap();
+    assert!(get(&w, &ana, &ps_d).is_none());
+    // A user without a ticket name writes whatever its console says.
+    try_write(&w, &dev, &ps_d, name_field("Local")).unwrap();
+    assert_eq!(get(&w, &ana, &ps_d).unwrap().get("name").and_then(Value::as_str), Some("Local"));
+    assert!(w.core.pending_bans().is_empty());
+    assert_eq!(w.core.counts()["Battle24"].players, 2);
+}
+
+/// Split screen (live, 2026-11-27): one console with two local players is ONE user, one ussid and
+/// one seat whose ticket carries two Players; both local players write the launcher's name into
+/// the seat's one PlayerStatic. Never a ban.
+#[test]
+fn a_split_screen_seat_writes_its_one_name_for_both_local_players() {
+    let mut policy = Policy::default();
+    policy.min_start = 1;
+    policy.gather_secs = 0.0;
+    let w = World::new(policy);
+    let mut ana = sign_in(&w, &dev_ticket("Ana"));
+    let player = Msg::new().bytes(1, "tenants/current/users/current").bytes(2, "attrs");
+    let body = Msg::new()
+        .msg(2, &Msg::new().bytes(2, "tenants/current/matchmakingConfigs/Battle24").msg(4, &player).msg(4, &player))
+        .into_bytes();
+    let reply = w.unary(ana.conn, CREATE, Some(&ana.token), &body).unwrap();
+    let name = wire::str_field(&reply, 1).unwrap().unwrap();
+    ana.ticket = format!("tenants/current/matchmakingTickets/{}", name.rsplit('/').next().unwrap());
+    let (_, rx) = w.call(ana.conn, TRACK, Some(&ana.token), Some(&Msg::new().bytes(1, &ana.ticket).into_bytes()), true);
+    ana.track = Some(rx);
+    w.advance(1.0);
+    assignment(&mut ana).expect("assigned");
+    assert_eq!(w.core.counts()["Battle24"].players, 2, "one seat, two players");
+    let ussid = ussid_of(&join_session(&w, &mut ana));
+    let ps = format!("docs/PlayerStatic/{ussid}");
+    for lid in [0, 1] {
+        try_write(&w, &ana, &ps, Fields::new().with("p2p_sid", Value::Int(77)).with("p2p_lid", Value::Int(lid))).unwrap();
+        try_write(&w, &ana, &ps, name_field("Ana")).unwrap();
+    }
+    // A second document for the second local player (the game writes none today): not this seat's
+    // own, so refused and never compared.
+    try_write(&w, &ana, &format!("docs/PlayerStatic/{}", ussid + 1), name_field("Guest")).unwrap();
+    assert!(w.core.pending_bans().is_empty());
+    assert_eq!(w.core.counts()["Battle24"].players, 2);
+    assert_eq!(get(&w, &ana, &ps).unwrap().get("name").and_then(Value::as_str), Some("Ana"));
+}
+
+#[test]
+fn a_spoofer_on_this_machine_loses_the_name_not_the_address() {
+    let w = World::new(Policy::default());
+    let mut ana = sign_in(&w, &dev_ticket("Ana"));
+    let mut bia = sign_in(&w, &dev_ticket("Bia"));
+    let (_, ussid_b) = matched(&w, &mut ana, &mut bia);
+    assert_eq!(try_write(&w, &bia, &format!("docs/PlayerStatic/{ussid_b}"), name_field("Nintendo")), Err(BANNED));
+    let pending = w.core.pending_bans();
+    assert_eq!((pending[0].name.as_str(), pending[0].ip.as_deref()), ("Bia", None), "loopback is never banned");
+    assert_eq!(sign_in_from(&w, &dev_ticket("Bia"), None).err(), Some(BANNED));
+    assert!(sign_in_from(&w, &dev_ticket("Cid"), None).is_ok());
+    // Queued again by a restarted lobby (its queue file): enforced and still to deliver.
+    let w2 = World::new(Policy::default());
+    w2.core.requeue_bans(pending.clone());
+    assert_eq!(sign_in_from(&w2, &dev_ticket("Bia"), None).err(), Some(BANNED));
+    assert_eq!(w2.core.pending_bans(), pending);
 }

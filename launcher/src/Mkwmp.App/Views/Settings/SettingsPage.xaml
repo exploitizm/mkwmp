@@ -1,0 +1,437 @@
+<UserControl x:Class="Mkwmp.App.Views.Settings.SettingsPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:Mkwmp.App.Controls"
+             xmlns:input="clr-namespace:Mkwmp.App.Input"
+             xmlns:settings="clr-namespace:Mkwmp.App.Views.Settings"
+             xmlns:v="clr-namespace:Mkwmp.App.Views"
+             Focusable="False">
+  <!-- DataContext: SettingsViewModel. PageHeader, the CategoryList at the left, the chosen category's
+       pane at the right (SectionHeader + SettingsRow; text boxes in "Field" rows). -->
+  <UserControl.Resources>
+    <!-- a row that holds a label and a text box -->
+    <Style x:Key="Field" TargetType="Border">
+      <Setter Property="BorderBrush" Value="{DynamicResource Brush.Rule}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1.5" />
+      <Setter Property="Padding" Value="20,14,20,14" />
+    </Style>
+    <Style x:Key="FieldLabel" TargetType="TextBlock" BasedOn="{StaticResource Text.Base}">
+      <Setter Property="FontSize" Value="32" />
+      <Setter Property="Margin" Value="0,0,28,0" />
+    </Style>
+    <!-- a paragraph under a group of rows -->
+    <Style x:Key="Note" TargetType="TextBlock" BasedOn="{StaticResource Text.Caption}">
+      <Setter Property="Margin" Value="20,16,20,0" />
+    </Style>
+  </UserControl.Resources>
+
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition Height="*" />
+    </Grid.RowDefinitions>
+    <c:PageHeader Title="{Binding S[settings.title]}" Icon="{StaticResource Icon.Settings}" />
+
+    <Grid Grid.Row="1" Margin="{StaticResource Metric.PageMargin}">
+      <Grid.ColumnDefinitions>
+        <ColumnDefinition Width="520" />
+        <ColumnDefinition Width="Auto" />
+        <ColumnDefinition Width="*" />
+      </Grid.ColumnDefinitions>
+
+      <c:CategoryList ItemsSource="{Binding Categories}" SelectedItem="{Binding Category, Mode=TwoWay}" Margin="20,0,0,0"
+                      input:FocusNav.IsColumn="True" />
+      <Border Grid.Column="1" Width="1.5" Margin="0,22,0,0" Background="{DynamicResource Brush.Rule}" />
+
+      <c:SmoothScrollViewer Grid.Column="2" Padding="62,0,60,60" EdgePadding="90" input:FocusNav.IsGroup="True" input:FocusNav.IsColumn="True">
+        <Grid>
+
+          <!-- ═════════ Profile: the name on this device ═════════ -->
+          <StackPanel Visibility="{Binding CategoryKey, Converter={StaticResource Conv.Visible}, ConverterParameter='=profile'}">
+            <Border Style="{StaticResource Card}" Margin="0,38,0,0">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <c:Avatar DisplayName="{Binding LocalNameShown}" Width="116" Height="116" Picture="{Binding ProfilePicture}" Color="{Binding ProfileColor}" />
+                <StackPanel Grid.Column="1" Margin="28,0,0,0" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding LocalNameShown}" Style="{StaticResource Text.Title}" />
+                  <TextBlock Text="{Binding LocalNameNote}" Style="{StaticResource Text.Caption}" />
+                </StackPanel>
+              </Grid>
+            </Border>
+            <c:SectionHeader Text="{Binding S[settings.profile.local]}" Visibility="{Binding ShowLocalNameSection, Converter={StaticResource Conv.Visible}}" />
+            <Border Style="{StaticResource Field}" Visibility="{Binding ShowLocalNameBox, Converter={StaticResource Conv.Visible}}">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <TextBlock Text="{Binding S[settings.profile.local_label]}" Style="{StaticResource FieldLabel}" />
+                <Grid Grid.Column="1">
+                  <TextBox x:Name="LocalNameBox" Text="{Binding LocalName, UpdateSourceTrigger=PropertyChanged}" MaxLength="16"
+                           input:TextEntry.Placeholder="{Binding S[setup.name.hint]}"
+                           input:TextEntry.Title="{Binding S[settings.profile.local_label]}" input:TextEntry.Charset="Gamertag" />
+                </Grid>
+              </Grid>
+            </Border>
+            <TextBlock Text="{Binding LocalNameCaption}" Style="{StaticResource Note}" Visibility="{Binding ShowLocalNameSection, Converter={StaticResource Conv.Visible}}" />
+            <!-- where the player goes online: Settings › Nextendo (Settings › Online for an install on MKWMP servers) -->
+            <c:SettingsRow Label="{Binding ProfileOnlineLabel}" Kind="Chevron" Icon="{StaticResource Icon.Globe}" Margin="0,18,0,0"
+                           Command="{Binding OnlineCommand}" Caption="{Binding ProfileOnlineCaption}" />
+            <!-- who is in the game's online lobby right now, in memory only (LobbyViewModel) -->
+            <c:SettingsRow Label="{Binding S[lobby.title]}" Kind="Chevron" Icon="{StaticResource Icon.Friends}"
+                           Command="{Binding LobbyCommand}" Caption="{Binding S[lobby.caption]}" />
+            <TextBlock Text="{Binding BusyNote}" Style="{StaticResource Note}" Visibility="{Binding BusyNote, Converter={StaticResource Conv.Visible}}" />
+          </StackPanel>
+
+          <!-- ═════════ Nextendo: the account PLAY goes online with (Views/Settings/NextendoPane.xaml) ═════════ -->
+          <settings:NextendoPane Visibility="{Binding CategoryKey, Converter={StaticResource Conv.Visible}, ConverterParameter='=nextendo'}" />
+
+          <!-- ═════════ Online: Nextendo Network, and the alternative: an MKWMP server, the profile on it, privacy (Views/Settings/OnlinePane.xaml) ═════════ -->
+          <settings:OnlinePane Visibility="{Binding CategoryKey, Converter={StaticResource Conv.Visible}, ConverterParameter='=online'}" />
+
+          <!-- ═════════ Game ═════════ -->
+          <StackPanel Visibility="{Binding CategoryKey, Converter={StaticResource Conv.Visible}, ConverterParameter='=game'}">
+            <c:SectionHeader Text="{Binding S[settings.game]}" />
+            <c:SettingsRow Label="{Binding S[settings.game.target]}" Kind="Chevron" Icon="{StaticResource Icon.Kart}"
+                           Value="{Binding Game.TargetName}" Command="{Binding Game.TargetCommand}" />
+            <settings:GamePanel DataContext="{Binding Game}" />
+
+            <!-- the game's setup (and its runtime's download): its state, and the way to its card -->
+            <c:SettingsRow Label="{Binding S[settings.game.setup_row]}" Kind="Chevron" Icon="{StaticResource Icon.Refresh}" Margin="0,14,0,0"
+                           Value="{Binding Game.SetupState}" Command="{Binding Game.SetupCommand}" Caption="{Binding Game.SetupCaption}"
+                           Visibility="{Binding Game.HasSetupRow, Converter={StaticResource Conv.Visible}}" />
+            <!-- another copy of the game, once it is set up: the picker, how to take it, the setup again (ViewModels/Parts/GameCopy.cs) -->
+            <c:SettingsRow Label="{Binding S[settings.game.copy_row]}" Kind="Chevron" Icon="{StaticResource Icon.Package}"
+                           Command="{Binding Game.ChangeCopyCommand}" Caption="{Binding Game.CopyCaption}"
+                           Visibility="{Binding Game.HasCopyRow, Converter={StaticResource Conv.Visible}}" />
+            <!-- every step that builds the game, again, from the same copy (it asks first: as long as the first setup) -->
+            <c:SettingsRow Label="{Binding S[settings.game.rebuild_row]}" Kind="Chevron" Icon="{StaticResource Icon.Refresh}"
+                           Command="{Binding Game.RebuildCommand}" Caption="{Binding S[settings.game.rebuild_caption]}"
+                           Visibility="{Binding Game.HasCopyRow, Converter={StaticResource Conv.Visible}}" />
+            <!-- the play checklist: everything PLAY needs, its state, a button to fix each -->
+            <c:SettingsRow Label="{Binding S[settings.game.check_row]}" Kind="Chevron" Icon="{StaticResource Icon.Check}"
+                           Value="{Binding Game.ChecklistState}" Command="{Binding Game.ChecklistCommand}" Caption="{Binding S[settings.game.check_caption]}" />
+            <!-- mkw-recomp's own start screen (mkw.exe with its launcher flag), not the game: its settings, files, mods and tools -->
+            <c:SettingsRow Label="{Binding S[settings.game.own_launcher_row]}" Kind="Chevron" Icon="{StaticResource Icon.Program}"
+                           Command="{Binding Game.OwnLauncherCommand}" Caption="{Binding S[settings.game.own_launcher_caption]}"
+                           Visibility="{Binding Game.HasOwnLauncher, Converter={StaticResource Conv.Visible}}" />
+
+            <c:SectionHeader Text="{Binding Game.FilesTitle}" />
+            <TextBlock Text="{Binding Game.FilesCaption}" Style="{StaticResource Note}" />
+            <ItemsControl ItemsSource="{Binding Game.Files}" Focusable="False" Margin="66,10,20,0"
+                          Visibility="{Binding Game.HasFiles, Converter={StaticResource Conv.Visible}}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding}" Style="{StaticResource Text.Caption}" FontSize="23" LineHeight="33" />
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <c:SettingsRow Label="{Binding Game.InstallLabel}" Icon="{StaticResource Icon.Download}" Margin="0,10,0,0"
+                           Command="{Binding Game.InstallCommand}" Caption="{Binding Game.InstallCaption}" />
+            <c:SettingsRow Label="{Binding S[settings.game.uninstall]}" Icon="{StaticResource Icon.Trash}" IsDestructive="True"
+                           Command="{Binding Game.UninstallCommand}" Caption="{Binding Game.UninstallCaption}" />
+            <TextBlock Text="{Binding Game.Note}" Margin="20,10,20,0"
+                       Visibility="{Binding Game.Note, Converter={StaticResource Conv.Visible}}">
+              <TextBlock.Style>
+                <Style TargetType="TextBlock" BasedOn="{StaticResource Text.Caption}">
+                  <Setter Property="Foreground" Value="{DynamicResource Brush.Good}" />
+                  <Style.Triggers>
+                    <DataTrigger Binding="{Binding Game.NoteIsError}" Value="True">
+                      <Setter Property="Foreground" Value="{DynamicResource Brush.Bad}" />
+                    </DataTrigger>
+                    <DataTrigger Binding="{Binding Game.Working}" Value="True">
+                      <Setter Property="Foreground" Value="{DynamicResource Brush.TextMuted}" />
+                    </DataTrigger>
+                  </Style.Triggers>
+                </Style>
+              </TextBlock.Style>
+            </TextBlock>
+
+            <StackPanel Visibility="{Binding NoGameSettingsNote, Converter={StaticResource Conv.Visible}}">
+              <c:SectionHeader Text="{Binding S[settings.gs.heading]}" />
+              <TextBlock Text="{Binding NoGameSettingsNote}" Style="{StaticResource Note}" />
+            </StackPanel>
+
+            <c:SectionHeader Text="{Binding S[settings.game.start]}" />
+            <c:SettingsRow Label="{Binding S[settings.game.steam]}" Kind="Toggle" IsOn="{Binding Game.FromSteam}"
+                           IsEnabled="{Binding Game.CanChange}" Caption="{Binding S[settings.game.steam_caption]}" />
+            <!-- when the seat on an MKWMP server is taken: nothing on Nextendo Network (no seat there) -->
+            <c:SettingsRow Label="{Binding S[settings.game.seat]}" Kind="Chevron" Value="{Binding SeatName}" Command="{Binding SeatCommand}"
+                           Caption="{Binding S[settings.game.seat_body]}"
+                           Visibility="{Binding ShowMkwmpOnline, Converter={StaticResource Conv.Visible}}" />
+
+            <c:SectionHeader Text="{Binding S[settings.game.overlay]}" />
+            <c:SettingsRow Label="{Binding S[settings.game.shortcut]}" Kind="Chevron" Icon="{StaticResource Icon.Gamepad}"
+                           Value="{Binding ShortcutName}" Command="{Binding ShortcutCommand}" Caption="{Binding ShortcutNote}" />
+            <TextBlock Text="{Binding S[settings.game.shortcut_warning]}" Style="{StaticResource Note}" />
+
+            <c:SectionHeader Text="{Binding S[settings.game.advanced]}" />
+            <Border Style="{StaticResource Field}">
+              <StackPanel>
+                <TextBlock Text="{Binding S[settings.game.typed]}" Style="{StaticResource FieldLabel}" Margin="0,0,0,12" />
+                <Grid>
+                  <TextBox x:Name="TypedFolder" Text="{Binding Game.TypedFolder, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding Game.CanChange}"
+                           input:TextEntry.Placeholder="{Binding S[settings.game.typed_hint]}" />
+                </Grid>
+                <TextBlock Text="{Binding Game.TypedFolderCaption}" Style="{StaticResource Text.Caption}" Margin="0,10,0,0" />
+              </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Field}">
+              <StackPanel>
+                <TextBlock Text="{Binding S[settings.game.command]}" Style="{StaticResource FieldLabel}" Margin="0,0,0,12" />
+                <Grid>
+                  <TextBox x:Name="LaunchBox" Text="{Binding LaunchCommandText, UpdateSourceTrigger=LostFocus}" IsEnabled="{Binding NotBusy}"
+                           input:TextEntry.Placeholder="{Binding S[settings.game.command_hint]}" />
+                </Grid>
+                <TextBlock Text="{Binding S[settings.game.command_caption]}" Style="{StaticResource Text.Caption}" Margin="0,10,0,0" />
+              </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Field}">
+              <StackPanel>
+                <Grid>
+                  <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="260" />
+                  </Grid.ColumnDefinitions>
+                  <TextBlock Text="{Binding S[settings.game.port]}" Style="{StaticResource FieldLabel}" />
+                  <TextBox Grid.Column="1" Text="{Binding LocalPortText, UpdateSourceTrigger=LostFocus}" MaxLength="5" IsEnabled="{Binding NotBusy}"
+                           TextAlignment="Right" InputScope="Number" />
+                </Grid>
+                <TextBlock Text="{Binding S[settings.game.port_caption]}" Style="{StaticResource Text.Caption}" Margin="0,10,0,0" />
+              </StackPanel>
+            </Border>
+            <TextBlock Text="{Binding BusyNote}" Style="{StaticResource Note}" Visibility="{Binding BusyNote, Converter={StaticResource Conv.Visible}}" />
+          </StackPanel>
+
+          <!-- ═════════ The game's own settings: rows from the target's schema ═════════ -->
+          <StackPanel x:Name="GameSettingsPane" Visibility="{Binding CategoryKey, Converter={StaticResource Conv.Visible}, ConverterParameter='=gs'}">
+            <c:SectionHeader Text="{Binding GameCategoryTitle}" />
+            <Border Style="{StaticResource Card}" Margin="0,18,0,0" Visibility="{Binding GameSettingsNote, Converter={StaticResource Conv.Visible}}">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <c:Icon Data="{StaticResource Icon.Info}" Width="40" Height="40" VerticalAlignment="Top" Margin="0,2,20,0">
+                  <c:Icon.Style>
+                    <Style TargetType="c:Icon">
+                      <Setter Property="Foreground" Value="{DynamicResource Brush.TextMuted}" />
+                      <Style.Triggers>
+                        <DataTrigger Binding="{Binding GameSettingsNoteIsError}" Value="True">
+                          <Setter Property="Foreground" Value="{DynamicResource Brush.Bad}" />
+                        </DataTrigger>
+                      </Style.Triggers>
+                    </Style>
+                  </c:Icon.Style>
+                </c:Icon>
+                <TextBlock Grid.Column="1" Text="{Binding GameSettingsNote}">
+                  <TextBlock.Style>
+                    <Style TargetType="TextBlock" BasedOn="{StaticResource Text.Caption}">
+                      <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
+                      <Style.Triggers>
+                        <DataTrigger Binding="{Binding GameSettingsNoteIsError}" Value="True">
+                          <Setter Property="Foreground" Value="{DynamicResource Brush.Bad}" />
+                        </DataTrigger>
+                      </Style.Triggers>
+                    </Style>
+                  </TextBlock.Style>
+                </TextBlock>
+              </Grid>
+            </Border>
+            <Border Style="{StaticResource Card}" Margin="0,18,0,0" Visibility="{Binding GameAdvancedNote, Converter={StaticResource Conv.Visible}}">
+              <Grid>
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="Auto" />
+                  <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <c:Icon Data="{StaticResource Icon.Warning}" Width="40" Height="40" VerticalAlignment="Top" Margin="0,2,20,0"
+                        Foreground="{DynamicResource Brush.Warn}" />
+                <TextBlock Grid.Column="1" Text="{Binding GameAdvancedNote}" Style="{StaticResource Text.Caption}" Foreground="{DynamicResource Brush.Text}" />
+              </Grid>
+            </Border>
+            <TextBlock Text="{Binding GamePlainNote}" Style="{StaticResource Note}" Visibility="{Binding GamePlainNote, Converter={StaticResource Conv.Visible}}" />
+            <TextBlock Text="{Binding GameSchemaNote}" Style="{StaticResource Note}" Visibility="{Binding GameSchemaNote, Converter={StaticResource Conv.Visible}}" />
+
+            <ItemsControl ItemsSource="{Binding GameRows}" Focusable="False" Margin="0,8,0,0">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <StackPanel Visibility="{Binding Visible, Converter={StaticResource Conv.Visible}}">
+                    <TextBlock Text="{Binding Heading}" Style="{StaticResource Text.Base}" FontSize="25" FontWeight="SemiBold"
+                               Foreground="{DynamicResource Brush.TextMuted}" Margin="20,34,20,6"
+                               Visibility="{Binding Heading, Converter={StaticResource Conv.Visible}}" />
+                    <Grid>
+                      <c:SettingsRow Label="{Binding Label}" Kind="Toggle" IsOn="{Binding IsOn}" IsEnabled="{Binding Enabled}" Caption="{Binding Caption}"
+                                     Visibility="{Binding IsToggle, Converter={StaticResource Conv.Visible}}" />
+                      <c:SettingsRow Label="{Binding Label}" Kind="Chevron" Value="{Binding ChoiceText}" Command="{Binding PickCommand}" Caption="{Binding Caption}"
+                                     Visibility="{Binding IsChoice, Converter={StaticResource Conv.Visible}}" />
+                      <StackPanel Visibility="{Binding IsRange, Converter={StaticResource Conv.Visible}}">
+                        <c:ConsoleSlider Label="{Binding Label}" Value="{Binding Number, Mode=TwoWay}" Minimum="{Binding Minimum}" Maximum="{Binding Maximum}"
+                                         SmallChange="{Binding Step}" LargeChange="{Binding Step}" DisplayText="{Binding NumberText}"
+                                         IsEnabled="{Binding Enabled}" />
+                        <TextBlock Text="{Binding Caption}" Style="{StaticResource Text.Caption}" Margin="20,14,20,20"
+                                   Visibility="{Binding Caption, Converter={StaticResource Conv.Visible}}" />
+                      </StackPanel>
+                      <Border Style="{StaticResource Field}" Visibility="{Binding IsText, Converter={StaticResource Conv.Visible}}">
+                        <StackPanel>
+                          <Grid>
+                            <Grid.ColumnDefinitions>
+                              <ColumnDefinition Width="*" />
+                              <ColumnDefinition Width="1.2*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding Label}" Style="{StaticResource FieldLabel}" />
+                            <TextBox Grid.Column="1" Text="{Binding Text, UpdateSourceTrigger=LostFocus}" MaxLength="{Binding MaxLength}"
+                                     IsEnabled="{Binding Enabled}" />
+                          </Grid>
+                          <TextBlock Text="{Binding Caption}" Style="{StaticResource Text.Caption}" Margin="0,12,0,4"
+                                     Visibility="{Binding Caption, Converter={StaticResource Conv.Visible}}" />
+                        </StackPanel>
+                      </Border>
+                      <!-- the mark of a setting that is not at its default -->
+                      <Ellipse Width="10" Height="10" Fill="{DynamicResource Brush.Accent}" HorizontalAlignment="Left" VerticalAlignment="Top"
+                               Margin="2,47,0,0" IsHitTestVisible="False"
+                               Visibility="{Binding IsChanged, Converter={StaticResource Conv.Visible}}" />
+                    </Grid>
+                  </StackPanel>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
+            <StackPanel Visibility="{Binding HasGameRows, Converter={StaticResource Conv.Visible}}">
+              <TextBlock Text="{Binding S[settings.gs.legend]}" Style="{StaticResource Note}" Margin="20,26,20,0" />
+              <c:SettingsRow Label="{Binding S[settings.gs.reset_all]}" Icon="{StaticResource Icon.Refresh}" Command="{Binding ResetGameSettingsCommand}"
+                             Caption="{Binding S[settings.gs.reset_all_caption]}" Margin="0,8,0,0" />
+            </StackPanel>
+          </StackPanel>
+
+          <!-- ═════════ Voice & Camera (Views/Settings/VoicePane.xaml) ═════════ -->
+          <settings:VoicePane Visibility="{Binding CategoryKey, Converter={StaticResource Conv.Visible}, ConverterParameter='=voice'}" />
+
+          <!-- ═════════ Locked online: a category that needs a server, and none is set ═════════ -->
+          <v:OnlineLocked Margin="0,96,0,0" Title="{Binding S[settings.locked.title]}" Text="{Binding S[settings.locked.text]}"
+                          Visibility="{Binding CategoryKey, Converter={StaticResource Conv.Visible}, ConverterParameter='=locked'}" />
+
+          <!-- ═════════ Notifications and background ═════════ -->
+          <StackPanel Visibility="{Binding CategoryKey, Converter={StaticResource Conv.Visible}, ConverterParameter='=notifications'}">
+            <c:SectionHeader Text="{Binding S[settings.notify.when]}" />
+            <!-- locked online: friends' news needs a server (an install on MKWMP servers without one) -->
+            <c:SettingsRow Label="{Binding S[settings.notify.locked]}" Kind="Chevron" Icon="{StaticResource Icon.Lock}" Value="{Binding S[online.configure]}"
+                           Command="{Binding ConfigureOnlineCommand}"
+                           Visibility="{Binding ShowNotifyLocked, Converter={StaticResource Conv.Visible}}" />
+            <!-- on Nextendo Network with nobody signed in: friends' news comes with the sign-in; said, with nothing to press -->
+            <c:SettingsRow Label="{Binding S[settings.notify.locked_nextendo]}" Icon="{StaticResource Icon.Info}" Focusable="False"
+                           Visibility="{Binding ShowNotifyNextendo, Converter={StaticResource Conv.Visible}}" />
+            <!-- an MKWMP server's friends, or the Nextendo account's -->
+            <StackPanel Visibility="{Binding ShowNotifyToggles, Converter={StaticResource Conv.Visible}}">
+              <c:SettingsRow Label="{Binding S[settings.notify.online]}" Kind="Toggle" IsOn="{Binding NotifyOnline}" />
+              <c:SettingsRow Label="{Binding S[settings.notify.playing]}" Kind="Toggle" IsOn="{Binding NotifyPlaying}" />
+              <c:SettingsRow Label="{Binding S[settings.notify.requests]}" Kind="Toggle" IsOn="{Binding NotifyRequests}" />
+            </StackPanel>
+            <c:SettingsRow Label="{Binding S[settings.notify.test]}" Icon="{StaticResource Icon.Bell}" Command="{Binding TestToastCommand}"
+                           Caption="{Binding S[settings.notify.test_caption]}" />
+
+            <c:SectionHeader Text="{Binding S[settings.background]}" />
+            <c:SettingsRow Label="{Binding S[settings.background.tray]}" Kind="Toggle" IsOn="{Binding CloseToTray}" IsEnabled="{Binding HasTray}"
+                           Caption="{Binding TrayRowCaption}" />
+            <c:SettingsRow Label="{Binding S[settings.background.autostart]}" Kind="Toggle" IsOn="{Binding StartWithSystem}"
+                           Visibility="{Binding CanStartWithSystem, Converter={StaticResource Conv.Visible}}" />
+            <TextBlock Text="{Binding TrayCaption}" Style="{StaticResource Note}" Visibility="{Binding TrayCaption, Converter={StaticResource Conv.Visible}}" />
+            <TextBlock Text="{Binding S[settings.background.autostart_linux]}" Style="{StaticResource Note}"
+                       Visibility="{Binding IsWine, Converter={StaticResource Conv.Visible}}" />
+          </StackPanel>
+
+          <!-- ═════════ Appearance ═════════ -->
+          <StackPanel Visibility="{Binding CategoryKey, Converter={StaticResource Conv.Visible}, ConverterParameter='=appearance'}">
+            <c:SectionHeader Text="{Binding S[settings.appearance.look]}" />
+            <c:SettingsRow Label="{Binding S[settings.theme]}" Kind="Value" Value="{Binding ThemeName}" Command="{Binding ThemeCommand}" />
+            <c:SettingsRow Label="{Binding S[settings.contrast]}" Kind="Chevron" Value="{Binding ContrastName}" Command="{Binding ContrastCommand}"
+                           Caption="{Binding S[settings.contrast.caption]}" />
+            <c:SettingsRow Label="{Binding S[settings.fullscreen]}" Kind="Toggle" IsOn="{Binding Fullscreen}"
+                           Caption="{Binding S[settings.fullscreen.caption]}" />
+            <c:SectionHeader Text="{Binding S[settings.appearance.language]}" />
+            <c:SettingsRow Label="{Binding S[settings.language]}" Kind="Chevron" Value="{Binding LanguageName}" Command="{Binding LanguageCommand}"
+                           Caption="{Binding LanguageCaption}" />
+          </StackPanel>
+
+          <!-- ═════════ Updates ═════════ -->
+          <StackPanel Visibility="{Binding CategoryKey, Converter={StaticResource Conv.Visible}, ConverterParameter='=updates'}">
+            <c:SectionHeader Text="{Binding S[settings.updates]}" />
+            <c:SettingsRow Label="{Binding S[settings.updates.version]}" Kind="Value" Value="{Binding VersionText}" Focusable="False"
+                           Caption="{Binding UpdateStatus}" />
+            <c:SettingsRow Label="{Binding UpdateInstallLabel}" Kind="Chevron" Icon="{StaticResource Icon.Download}" Command="{Binding UpdateCommand}"
+                           Visibility="{Binding UpdateAvailable, Converter={StaticResource Conv.Visible}}" />
+            <!-- the run that went on offline after a failed update: the way back, always here -->
+            <c:SettingsRow Label="{Binding S[online.update.button]}" Kind="Chevron" Icon="{StaticResource Icon.Warning}" Command="{Binding UpdateCommand}"
+                           Caption="{Binding S[online.update.text]}"
+                           Visibility="{Binding UpdateOffline, Converter={StaticResource Conv.Visible}}" />
+            <c:SettingsRow Label="{Binding S[settings.updates.check]}" Icon="{StaticResource Icon.Refresh}" Command="{Binding CheckUpdateCommand}">
+              <c:Spinner Width="40" Height="40" Visibility="{Binding UpdateBusy, Converter={StaticResource Conv.Visible}}" />
+            </c:SettingsRow>
+            <!-- stable, or alpha for the test versions (-rc) too; on a test version back on stable: the way back to the newest stable release -->
+            <c:SettingsRow Label="{Binding S[settings.updates.channel]}" Kind="Chevron" Value="{Binding UpdateChannelName}" Command="{Binding UpdateChannelCommand}"
+                           Caption="{Binding S[settings.updates.channel.caption]}" />
+            <c:SettingsRow Label="{Binding StableReturnLabel}" Kind="Chevron" Icon="{StaticResource Icon.Download}" Command="{Binding StableReturnCommand}"
+                           Caption="{Binding StableReturnCaption}"
+                           Visibility="{Binding ShowStableReturn, Converter={StaticResource Conv.Visible}}" />
+            <c:SettingsRow Label="{Binding S[home.update]}" Kind="Chevron" Icon="{StaticResource Icon.Info}" Command="{Binding WhatsNewCommand}"
+                           Caption="{Binding S[whatsnew.caption]}" />
+            <StackPanel Visibility="{Binding UpdateNotes, Converter={StaticResource Conv.Visible}}">
+              <c:SectionHeader Text="{Binding S[settings.updates.notes]}" />
+              <Border Style="{StaticResource Card}" Margin="0,18,0,0">
+                <TextBlock Text="{Binding UpdateNotes}" Style="{StaticResource Text.Caption}" FontSize="26" LineHeight="40" />
+              </Border>
+            </StackPanel>
+          </StackPanel>
+
+          <!-- ═════════ Support ═════════ -->
+          <StackPanel Visibility="{Binding CategoryKey, Converter={StaticResource Conv.Visible}, ConverterParameter='=support'}">
+            <c:SectionHeader Text="{Binding S[settings.support.bug]}" />
+            <c:SettingsRow Label="{Binding S[settings.support.found_bug]}" Kind="Chevron" Icon="{StaticResource Icon.Warning}" Command="{Binding FoundBugCommand}"
+                           Caption="{Binding S[settings.support.found_bug_caption]}" />
+            <c:SettingsRow Label="{Binding S[settings.support.logs]}" Icon="{StaticResource Icon.Download}" Command="{Binding SaveLogsCommand}"
+                           Caption="{Binding S[settings.support.logs_caption]}" />
+            <c:SettingsRow Label="{Binding S[settings.support.issues]}" Kind="Chevron" Icon="{StaticResource Icon.Flag}" Command="{Binding IssuesCommand}"
+                           Caption="https://github.com/anarqz/mkwmp/issues" />
+            <c:SettingsRow Label="{Binding S[settings.support.debug]}" Kind="Toggle" IsOn="{Binding DebugMode}"
+                           Caption="{Binding S[settings.support.debug_caption]}" />
+            <c:SectionHeader Text="{Binding S[settings.support.help]}" />
+            <c:SettingsRow Label="{Binding S[settings.support.guide]}" Kind="Chevron" Icon="{StaticResource Icon.Info}" Command="{Binding GuideCommand}"
+                           Caption="https://anarqz.github.io/mkwmp/" />
+            <c:SettingsRow Label="{Binding S[settings.support.repo]}" Kind="Chevron" Icon="{StaticResource Icon.Star}" Value="{Binding StarsText}"
+                           Command="{Binding RepoCommand}" Caption="https://github.com/anarqz/mkwmp" />
+          </StackPanel>
+
+          <!-- ═════════ About ═════════ -->
+          <StackPanel Visibility="{Binding CategoryKey, Converter={StaticResource Conv.Visible}, ConverterParameter='=about'}">
+            <Border Style="{StaticResource Card}" Margin="0,38,0,0">
+              <StackPanel>
+                <TextBlock Text="{Binding Shell.AboutTitle}" Style="{StaticResource Text.Heading}" />
+                <TextBlock Text="{Binding S[settings.about.what]}" Style="{StaticResource Text.Caption}" Margin="0,10,0,0" />
+                <TextBlock Text="{Binding S[settings.about.gpl]}" Style="{StaticResource Text.Caption}" Margin="0,14,0,0" />
+                <TextBlock Text="{Binding Shell.AboutRuntimeCredit, Mode=OneWay}" Style="{StaticResource Text.Caption}" Margin="0,14,0,0" />
+                <TextBlock Text="{Binding S[settings.about.not_affiliated]}" Style="{StaticResource Text.Caption}" FontSize="22" LineHeight="32" Margin="0,14,0,0" />
+              </StackPanel>
+            </Border>
+            <!-- The project MKWMP runs on, and its creator: credit with links (MIT), and the source of MKWMP's build of it -->
+            <c:SectionHeader Text="{Binding S[settings.about.recomp]}" />
+            <c:SettingsRow Label="{Binding S[settings.about.recomp_repo]}" Kind="Chevron" Command="{Binding RecompRepoCommand}"
+                           Caption="{Binding RecompRepoUrl, Mode=OneTime}" />
+            <c:SettingsRow Label="{Binding S[settings.about.recomp_creator]}" Kind="Chevron" Value="{Binding RecompCreatorHandle, Mode=OneTime}"
+                           Command="{Binding RecompCreatorCommand}" Caption="{Binding RecompCreatorUrl, Mode=OneTime}" />
+            <c:SettingsRow Label="{Binding S[settings.about.recomp_license]}" Kind="Chevron" Value="{Binding RecompLicense, Mode=OneTime}"
+                           Command="{Binding RecompLicenseCommand}" Caption="{Binding RecompLicenseUrl, Mode=OneTime}" />
+            <c:SettingsRow Label="{Binding S[settings.about.recomp_fork]}" Kind="Chevron" Command="{Binding RecompSourceCommand}"
+                           Caption="{Binding RecompSourceUrl, Mode=OneTime}" />
+            <c:SectionHeader Text="{Binding S[settings.about.links]}" />
+            <c:SettingsRow Label="{Binding S[home.update]}" Kind="Chevron" Command="{Binding WhatsNewCommand}"
+                           Caption="{Binding S[whatsnew.caption]}" />
+            <c:SettingsRow Label="{Binding S[settings.support.repo]}" Kind="Chevron" Command="{Binding RepoCommand}"
+                           Caption="https://github.com/anarqz/mkwmp" />
+          </StackPanel>
+        </Grid>
+      </c:SmoothScrollViewer>
+    </Grid>
+  </Grid>
+</UserControl>

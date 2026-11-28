@@ -1,0 +1,32 @@
+{
+  "_comment": "Steam library artwork for the MKWMP shortcut: MKWMP's own art (original, no third-party IP), in this repository under tools/linux/art and made by launcher/tools/make_art.py. Only links are stored here: the installer downloads them on the player's machine at install time. If a link is gone, the installer falls back to SteamGridDB's public search (POST https://www.steamgriddb.com/api/public/search/main/games, no key) and picks the first asset that is not nsfw/humor/epilepsy/animated, language en or none, official style first, upvotes-downvotes as the tie-break; and if that fails too, it installs without artwork.",
+  "steamgriddb_game_id": 5483943,
+  "search_term": "MKW",
+  "assets": {
+    "grid": {
+      "steam_file": "<appid>p.png",
+      "size": "600x900",
+      "url": "https://raw.githubusercontent.com/anarqz/mkwmp/main/tools/linux/art/grid.png"
+    },
+    "wide": {
+      "steam_file": "<appid>.png",
+      "size": "920x430",
+      "url": "https://raw.githubusercontent.com/anarqz/mkwmp/main/tools/linux/art/wide.png"
+    },
+    "hero": {
+      "steam_file": "<appid>_hero.png",
+      "size": "3840x1240",
+      "url": "https://raw.githubusercontent.com/anarqz/mkwmp/main/tools/linux/art/hero.png"
+    },
+    "logo": {
+      "steam_file": "<appid>_logo.png",
+      "size": "1280x289",
+      "url": "https://raw.githubusercontent.com/anarqz/mkwmp/main/tools/linux/art/logo.png"
+    },
+    "icon": {
+      "steam_file": "<appid>_icon.png",
+      "size": "256x256",
+      "url": "https://raw.githubusercontent.com/anarqz/mkwmp/main/tools/linux/art/icon.png"
+    }
+  }
+}

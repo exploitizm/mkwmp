@@ -95,7 +95,7 @@ static int reply(char *buf, size_t cap, const char **body, int status, const cha
     return status;
 }
 
-// ---- the friends watcher: the server's long poll, a notice per change (as the launcher's tray did)
+// ---- the friends watcher: the server's long poll, a notice per change (notify.c: mkwmp.log only, nothing in the game)
 static int find(const SeatApiFriend *list, int n, const char *name) {
     for (int i = 0; i < n; i++)
         if (!strcmp(list[i].name, name)) return i;
@@ -257,17 +257,17 @@ static void fetch_status(void) {
 // The answer seat.c understands for a view (seat_parse).
 static int view_reply(const SeatApiView *v, char *buf, size_t cap, const char **body) {
     if (!strcmp(v->state, "seated") && v->ticket[0])
-        return reply(buf, cap, body, 200, "{\"state\":\"seated\",\"ticket\":\"%s\",\"lobby\":\"%s\",\"name\":\"%s\"}",
-                     v->ticket, v->ticket_lobby, C.name);
+        return reply(buf, cap, body, 200, "{\"state\":\"seated\",\"ticket\":\"%s\",\"lobby\":\"%s\",\"name\":\"%s\",\"room\":%s}",
+                     v->ticket, v->ticket_lobby, C.name, v->room[0] ? v->room : "null");
     return reply(buf, cap, body, 200, "{\"state\":\"queued\",\"position\":%d,\"seatsTotal\":%d}", v->position,
                  v->seats_total);
 }
 
 static int refused(const SeatApiResult *r, char *buf, size_t cap, const char **body) {
-    const char *why = !strcmp(r->code, "PIN_WRONG")           ? "Wrong PIN: open Mods > MKWMP > Options and enter it again"
-                      : !strcmp(r->code, "PROFILE_NOT_FOUND") ? "This name is not registered: register it in Mods > MKWMP > Options"
+    const char *why = !strcmp(r->code, "PIN_WRONG")           ? "Wrong PIN: sign in again in the MKWMP launcher"
+                      : !strcmp(r->code, "PROFILE_NOT_FOUND") ? "This name is not registered: sign up in the MKWMP launcher"
                       : !strcmp(r->code, "NAME_TAKEN")        ? "This name is already online (the MKWMP launcher, or another PC)"
-                      : !strcmp(r->code, "NAME_REGISTERED")   ? "Your name expired and someone else took it: register another in Mods > MKWMP > Options"
+                      : !strcmp(r->code, "NAME_REGISTERED")   ? "Your name expired and someone else took it: sign up with another in the MKWMP launcher"
                                                               : r->message;
     mkwmp_log("seat: refused: %s (%s)", r->code, r->message);
     return reply(buf, cap, body, 409, "{\"state\":\"refused\",\"message\":\"%s\"}", clean(why));
@@ -281,10 +281,10 @@ static int seat(char *buf, size_t cap, const char **body) {
         r = seatapi_poll(C.server, g_sid, g_skey, &v);   // the heartbeat
         if (r.status == 200) return view_reply(&v, buf, cap, body);
         if (r.status != 404) {
-            mkwmp_log("seat: heartbeat: %d %s", r.status, r.message);
+            mkwmp_event("seat: heartbeat: %d %s", r.status, r.message);
             return reply(buf, cap, body, 503, "{\"state\":\"unavailable\",\"message\":\"%s\"}", clean(r.message));
         }
-        mkwmp_log("seat: session gone (server restarted or timed out): joining again");
+        mkwmp_event("seat: session gone (server restarted or timed out): joining again");
         g_sid[0] = g_skey[0] = 0;
     }
     r = seatapi_join(C.server, C.name, C.pin, &v);
@@ -292,13 +292,13 @@ static int seat(char *buf, size_t cap, const char **body) {
     if (r.status == 201 || r.status == 200) {
         snprintf(g_sid, sizeof g_sid, "%s", v.session_id);
         snprintf(g_skey, sizeof g_skey, "%s", v.session_key);
-        mkwmp_log("seat: joined as %s: %s%s", C.name, v.state, v.ticket[0] ? " with a ticket" : "");
+        mkwmp_event("seat: joined as %s: %s%s", C.name, v.state, v.ticket[0] ? " with a ticket" : "");
         return view_reply(&v, buf, cap, body);
     }
     if (r.status == 401 || r.status == 403 || r.status == 404 || r.status == 400 ||
         (r.status == 409 && (!strcmp(r.code, "NAME_TAKEN") || !strcmp(r.code, "NAME_REGISTERED"))))
         return refused(&r, buf, cap, body);
-    mkwmp_log("seat: join: %d %s %s (retry after %d s)", r.status, r.code, r.message, r.retry_after);
+    mkwmp_event("seat: join: %d %s %s (retry after %d s)", r.status, r.code, r.message, r.retry_after);
     return reply(buf, cap, body, 503, "{\"state\":\"unavailable\",\"message\":\"%s\"}", clean(r.message));
 }
 
@@ -331,7 +331,7 @@ static int friends(char *buf, size_t cap, const char **body) {
     return 200;
 }
 
-// The voice settings: the mod's (its in-game Voice chat tab and options page), read at each poll so a change applies
+// The voice settings: the mod's (written by the MKWMP launcher while the game is closed), read at each poll so a change applies
 // at once. Device ids go into JSON: quotes and backslashes are not kept.
 static void setting(const char *key, const char *fallback, char *out, size_t cap) {
     if (!C.setting_get || !C.setting_get(key, out, cap)) snprintf(out, cap, "%s", fallback);
@@ -362,7 +362,8 @@ static int voice_get(char *buf, size_t cap, const char **body) {
     return 200;
 }
 
-// {"account":"123","name":"x","muted":true}, from the pause menu's voice labels: kept across games
+// {"account":"123","name":"x","muted":true} (LAUNCHER_API.md's POST /local/v1/voice/mute; the mod itself no longer
+// posts it since it stopped drawing a mute menu in the game): kept across games
 static int voice_mute(const char *json, char *buf, size_t cap, const char **body) {
     char num[32] = "", name[40] = "";
     seatapi_json_str(json, "account", num, sizeof num);
@@ -443,7 +444,7 @@ void seatd_stop(void) {
         seatapi_set_timeout_ms(1500);   // the process ends right after: a slow server must not hold it
         if (g_sid[0]) {
             SeatApiResult r = seatapi_leave(C.server, g_sid, g_skey);
-            mkwmp_log("seat: given back (%d)", r.status);
+            mkwmp_event("seat: given back (%d)", r.status);
         }
         if (g_presence[0]) seatapi_presence_end(C.server, g_presence);
         seatapi_set_timeout_ms(0);

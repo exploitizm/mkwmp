@@ -1,0 +1,156 @@
+<UserControl x:Class="Mkwmp.App.Views.Settings.VoicePane"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="clr-namespace:Mkwmp.App.Controls"
+             Focusable="False">
+  <!-- DataContext: SettingsViewModel (SettingsViewModel.Voice.cs). Settings › Voice & Camera: what voice and
+       camera are (they exist only inside the game), then two sections built the same way:
+         Voice:  the switch; the microphone, its volume, its test; the output, its volume, its test
+         Camera: the switch; my own camera on or off; the camera, its test
+       and the muted players. Each switch is the first row of its section and says what "off" means; what
+       depends on it is in a c:Dependents right under it: gone while it is off (never greyed out). Nothing here talks to anyone: the launcher
+       only configures and tests. Reporting a player is in Settings › Online (Report Abuse). -->
+  <UserControl.Resources>
+    <Style x:Key="Field" TargetType="Border">
+      <Setter Property="BorderBrush" Value="{DynamicResource Brush.Rule}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1.5" />
+      <Setter Property="Padding" Value="20,14,20,14" />
+    </Style>
+    <Style x:Key="Note" TargetType="TextBlock" BasedOn="{StaticResource Text.Caption}">
+      <Setter Property="Margin" Value="20,16,20,0" />
+    </Style>
+    <!-- a line of the card at the top: an icon and what it says -->
+    <Style x:Key="FactIcon" TargetType="c:Icon">
+      <Setter Property="Width" Value="34" />
+      <Setter Property="Height" Value="34" />
+      <Setter Property="StrokeThickness" Value="1.9" />
+      <Setter Property="VerticalAlignment" Value="Top" />
+      <Setter Property="Margin" Value="0,2,20,0" />
+      <Setter Property="Foreground" Value="{DynamicResource Brush.Accent}" />
+    </Style>
+    <Style x:Key="Fact" TargetType="TextBlock" BasedOn="{StaticResource Text.Caption}">
+      <Setter Property="FontSize" Value="25" />
+      <Setter Property="LineHeight" Value="35" />
+      <Setter Property="Foreground" Value="{DynamicResource Brush.Text}" />
+    </Style>
+  </UserControl.Resources>
+
+  <StackPanel>
+    <!-- what this is, before anything can be set -->
+    <Border Style="{StaticResource Card}" Margin="0,38,0,0" Padding="30,22,30,24">
+      <StackPanel>
+        <TextBlock Text="{Binding S[settings.voice.info.title]}" Style="{StaticResource Text.Base}" FontSize="30" FontWeight="SemiBold" TextWrapping="Wrap" />
+        <Grid Margin="0,14,0,0">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="10" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="10" />
+            <RowDefinition Height="Auto" />
+          </Grid.RowDefinitions>
+          <c:Icon Data="{StaticResource Icon.Lock}" Style="{StaticResource FactIcon}" />
+          <TextBlock Grid.Column="1" Text="{Binding S[settings.voice.info.where]}" Style="{StaticResource Fact}" />
+          <c:Icon Grid.Row="2" Data="{StaticResource Icon.Friends}" Style="{StaticResource FactIcon}" />
+          <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding S[settings.voice.info.limit]}" Style="{StaticResource Fact}" />
+          <c:Icon Grid.Row="4" Data="{StaticResource Icon.Shield}" Style="{StaticResource FactIcon}" />
+          <TextBlock Grid.Row="4" Grid.Column="1" Text="{Binding S[settings.voice.info.live]}" Style="{StaticResource Fact}" />
+        </Grid>
+      </StackPanel>
+    </Border>
+
+    <!-- ═════════ Voice: the switch; the microphone, its volume, its test; the output, its volume, its test ═════════ -->
+    <c:SectionHeader Text="{Binding S[settings.chat.voice]}" />
+    <c:SettingsRow Label="{Binding S[settings.chat.enabled]}" Kind="Toggle" IsOn="{Binding VoiceEnabled}"
+                   Caption="{Binding S[settings.chat.enabled_caption]}" />
+    <c:Dependents Of="{Binding VoiceEnabled}">
+    <c:SettingsRow Label="{Binding S[settings.chat.input]}" Kind="Chevron" Icon="{StaticResource Icon.Mic}"
+                   Value="{Binding InputName}" Command="{Binding InputCommand}" />
+    <c:ConsoleSlider Label="{Binding S[settings.chat.mic_volume]}" Value="{Binding InputGain, Mode=TwoWay}" Minimum="1" Maximum="100" />
+    <c:SettingsRow Label="{Binding S[settings.chat.mic_test]}" Kind="Toggle" IsOn="{Binding MicTesting}"
+                   Caption="{Binding S[settings.chat.mic_test_caption]}">
+      <Grid Width="300" Height="16" Margin="0,0,30,0" Visibility="{Binding MicTesting, Converter={StaticResource Conv.Visible}}">
+        <Border x:Name="MeterTrack" CornerRadius="8" Background="{DynamicResource Brush.Track}" />
+        <Border CornerRadius="8" Background="{DynamicResource Brush.Good}" HorizontalAlignment="Left">
+          <Border.Width>
+            <MultiBinding Converter="{StaticResource Conv.Fraction}">
+              <Binding Path="Mic.Level" />
+              <Binding Path="ActualWidth" ElementName="MeterTrack" />
+            </MultiBinding>
+          </Border.Width>
+        </Border>
+      </Grid>
+    </c:SettingsRow>
+    <c:Dependents Of="{Binding MicTesting}">
+      <c:SettingsRow Label="{Binding S[settings.chat.hear]}" Kind="Toggle" IsOn="{Binding HearMyself}"
+                     Caption="{Binding S[settings.chat.hear_caption]}" />
+    </c:Dependents>
+    <c:SettingsRow Label="{Binding S[settings.chat.output]}" Kind="Chevron" Icon="{StaticResource Icon.Headset}"
+                   Value="{Binding OutputName}" Command="{Binding OutputCommand}" />
+    <c:ConsoleSlider Label="{Binding S[settings.chat.volume]}" Value="{Binding OutputGain, Mode=TwoWay}" Minimum="1" Maximum="100" />
+    <c:SettingsRow Label="{Binding S[settings.chat.output_test]}" Icon="{StaticResource Icon.Volume}" Command="{Binding TestOutputCommand}"
+                   Caption="{Binding S[settings.chat.output_test_caption]}" />
+    </c:Dependents>
+
+    <!-- ═════════ Camera: the switch; my own camera on or off; the camera, its test ═════════ -->
+    <c:SectionHeader Text="{Binding S[settings.chat.camera]}" />
+    <c:SettingsRow Label="{Binding S[settings.chat.camera_enabled]}" Kind="Toggle" IsOn="{Binding CameraEnabled}"
+                   IsEnabled="{Binding CanChangeGameCamera}" Caption="{Binding CameraCaption}" />
+    <c:Dependents Of="{Binding CameraEnabled}">
+    <!-- the one finer choice, while the camera is in use: see friends without being seen -->
+    <c:SettingsRow Label="{Binding S[settings.chat.show_mine]}" Kind="Toggle" IsOn="{Binding ShowMyCamera}"
+                   IsEnabled="{Binding CanShowMyCamera}" Caption="{Binding ShowMineCaption}" />
+    <!-- the device and its test: where this system can capture a camera at all -->
+    <StackPanel Visibility="{Binding CanTestCamera, Converter={StaticResource Conv.Visible}}">
+      <c:SettingsRow Label="{Binding S[settings.chat.camera_device]}" Kind="Chevron" Icon="{StaticResource Icon.Camera}"
+                     Value="{Binding CameraName}" Command="{Binding CameraCommand}" />
+      <c:SettingsRow Label="{Binding S[settings.chat.camera_test]}" Kind="Chevron" Command="{Binding TestCameraCommand}"
+                     Caption="{Binding S[settings.chat.camera_test_caption]}" />
+      <!-- mkwmp-camera.dll is missing or broken: why the two rows above are greyed out -->
+      <Border Style="{StaticResource Card}" Margin="0,18,0,0" Visibility="{Binding CameraDeviceNote, Converter={StaticResource Conv.Visible}}">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="*" />
+          </Grid.ColumnDefinitions>
+          <c:Icon Data="{StaticResource Icon.Info}" Width="40" Height="40" VerticalAlignment="Top" Margin="0,2,20,0"
+                  Foreground="{DynamicResource Brush.TextMuted}" />
+          <TextBlock Grid.Column="1" Text="{Binding CameraDeviceNote}" Style="{StaticResource Text.Caption}" />
+        </Grid>
+      </Border>
+    </StackPanel>
+    </c:Dependents>
+
+    <!-- ═════════ Muted players ═════════ -->
+    <c:SectionHeader Text="{Binding S[settings.chat.muted]}" />
+    <TextBlock Text="{Binding S[settings.chat.muted_none]}" Style="{StaticResource Note}"
+               Visibility="{Binding NoMutes, Converter={StaticResource Conv.Visible}}" />
+    <ItemsControl ItemsSource="{Binding Mutes}" Focusable="False">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate>
+          <Border Style="{StaticResource Field}" Padding="20,10,10,10">
+            <Grid>
+              <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="Auto" />
+              </Grid.ColumnDefinitions>
+              <c:Avatar DisplayName="{Binding Name}" Width="64" Height="64" />
+              <TextBlock Grid.Column="1" Text="{Binding Name}" Style="{StaticResource Text.Base}" FontSize="32" Margin="22,0" />
+              <c:ConsoleButton Grid.Column="2" MinWidth="210" Height="78" Padding="26,0" Content="{Binding DataContext.S[settings.chat.unmute], RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                               Command="{Binding UnmuteCommand}" />
+              <c:ConsoleButton Grid.Column="3" Kind="Secondary" MinWidth="210" Height="78" Padding="26,0" Margin="14,0,0,0"
+                               Icon="{StaticResource Icon.Flag}"
+                               Content="{Binding DataContext.S[settings.chat.report], RelativeSource={RelativeSource AncestorType=ItemsControl}}"
+                               Command="{Binding ReportCommand}" />
+            </Grid>
+          </Border>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+  </StackPanel>
+</UserControl>

@@ -1,0 +1,70 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:vm="clr-namespace:Mkwmp.App.ViewModels"
+                    xmlns:v="clr-namespace:Mkwmp.App.Views"
+                    xmlns:settings="clr-namespace:Mkwmp.App.Views.Settings"
+                    xmlns:setup="clr-namespace:Mkwmp.App.Views.Setup"
+                    xmlns:mods="clr-namespace:Mkwmp.App.Views.Mods"
+                    xmlns:dev="clr-namespace:Mkwmp.App.Views.Dev">
+  <!-- Which view shows which view model: pages (PageHost), bottom sheets, custom modal content.
+       A new page or sheet is one line here (and, for a top-level page, a route in ViewModels/Navigation.cs). -->
+  <DataTemplate DataType="{x:Type vm:HomeViewModel}">
+    <v:HomePage />
+  </DataTemplate>
+  <DataTemplate DataType="{x:Type vm:SettingsViewModel}">
+    <settings:SettingsPage />
+  </DataTemplate>
+  <DataTemplate DataType="{x:Type vm:SetupViewModel}">
+    <setup:SetupPage />
+  </DataTemplate>
+  <DataTemplate DataType="{x:Type vm:CameraTestViewModel}">
+    <settings:CameraTestPage />
+  </DataTemplate>
+  <DataTemplate DataType="{x:Type vm:ChoiceListViewModel}">
+    <settings:ChoiceList />
+  </DataTemplate>
+  <DataTemplate DataType="{x:Type vm:ChecklistViewModel}">
+    <v:ChecklistPage />
+  </DataTemplate>
+  <DataTemplate DataType="{x:Type vm:WhatsNewViewModel}">
+    <v:WhatsNewPage />
+  </DataTemplate>
+  <DataTemplate DataType="{x:Type vm:ReportViewModel}">
+    <settings:ReportPage />
+  </DataTemplate>
+  <DataTemplate DataType="{x:Type vm:BlockedPlayersViewModel}">
+    <settings:BlockedPlayersPage />
+  </DataTemplate>
+  <!-- Current Lobby: who is in the game's online lobby now (in memory only), and one of its players -->
+  <DataTemplate DataType="{x:Type vm:LobbyViewModel}">
+    <settings:LobbyPage />
+  </DataTemplate>
+  <DataTemplate DataType="{x:Type vm:LobbyPlayerViewModel}">
+    <settings:LobbyPlayerPage />
+  </DataTemplate>
+  <DataTemplate DataType="{x:Type vm:HiddenServersViewModel}">
+    <settings:HiddenServersPage />
+  </DataTemplate>
+  <DataTemplate DataType="{x:Type vm:PinRevealViewModel}">
+    <settings:PinReveal />
+  </DataTemplate>
+  <!-- Mods (launcher/docs/MODS.md): the installed ones, one of them, GameBanana's list, one of its mods, a link -->
+  <DataTemplate DataType="{x:Type vm:ModsViewModel}">
+    <mods:ModsPage />
+  </DataTemplate>
+  <DataTemplate DataType="{x:Type vm:ModDetailViewModel}">
+    <mods:ModDetailPage />
+  </DataTemplate>
+  <DataTemplate DataType="{x:Type vm:ModBrowserViewModel}">
+    <mods:ModBrowserPage />
+  </DataTemplate>
+  <DataTemplate DataType="{x:Type vm:ModPageViewModel}">
+    <mods:ModStorePage />
+  </DataTemplate>
+  <DataTemplate DataType="{x:Type vm:ModLinkViewModel}">
+    <mods:ModLinkPage />
+  </DataTemplate>
+  <DataTemplate DataType="{x:Type vm:GalleryViewModel}">
+    <dev:GalleryPage />
+  </DataTemplate>
+</ResourceDictionary>

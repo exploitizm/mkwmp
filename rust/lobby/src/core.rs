@@ -17,9 +17,24 @@ use crate::referee::Verdict;
 use crate::limits::{self, caps, Limiter, Rule};
 use crate::users::{self, Audience, Directory, Tokens};
 use crate::value::{Document, Fields, Value};
-use crate::{code, Call, ConnId, CoreConfig, Out, RosterEntry, StreamId};
+use crate::{code, BanReport, Call, ConnId, CoreConfig, Out, RosterEntry, StreamId, BAN_MESSAGE, IP_BAN_SECS};
 
 pub const AUTH_SIGN_IN: &str = "/nn.npln.auth.v1.Auth/IssuePrearrangedUserToken";
+/// The game refreshes its NPLN token shortly before it expires, on a new connection.
+pub const AUTH_REFRESH: &str = "/nn.npln.auth.v1.Auth/RefreshToken";
+/// Unary calls the game makes whose answer it ignores: an empty OK, as always (seen in production).
+/// None of the token-returning Auth RPCs may be here: the game aborts on an empty Token
+/// (research AUTH-REPLIES-1.8.0.md). Ugcstore/IssueUploadUri isn't either: an empty upload URI
+/// only makes uploads fail quietly, so it gets UNIMPLEMENTED like anything unknown.
+/// A follower asks for a token to follow its leader (groups.rs).
+pub const DELEGATION: &str = "/nn.npln.matchmaking.v1.GameSessionService/IssueUserDelegationToken";
+pub const EMPTY_OK: [&str; 5] = [
+    "/nn.npln.auth.v1.Auth/ValidateToken",
+    "/nn.npln.friends.v1.Friends/ActivateUser",
+    "/nn.npln.leaderboard.v1.LeaderboardService/UpdateHolder",
+    "/nn.npln.leaderboard.v1.LeaderboardService/BrowseLeaderboard",
+    "/nn.npln.leaderboard.v1.LeaderboardService/GetScore",
+];
 pub const GS_ISSUE_TOKEN: &str = "/nn.npln.gamesync.v1.Gamesync/IssueToken";
 pub const GS_REFRESH_TOKEN: &str = "/nn.npln.gamesync.v1.Gamesync/RefreshToken";
 pub const GS_GET_DOCUMENT: &str = "/nn.npln.gamesync.v1.Gamesync/GetDocument";
@@ -116,7 +131,7 @@ fn exhausted(what: &str) -> Out {
 /// The limit of a unary RPC by path.
 fn unary_rule(path: &str) -> Rule {
     match path {
-        AUTH_SIGN_IN => Rule::SignIn,
+        AUTH_SIGN_IN | AUTH_REFRESH => Rule::SignIn,
         GS_ISSUE_TOKEN | GS_REFRESH_TOKEN => Rule::GamesyncToken,
         MM_CREATE => Rule::Ticket,
         ROOM_CREATE | ALIAS_CREATE => Rule::RoomCreate,
@@ -167,6 +182,8 @@ struct State {
     deferred_sends: Sends,
     /// Seat session id (ticket `sid`) per user id, for the seat roster.
     seat_sessions: HashMap<String, String>,
+    /// Leaders and their followers (matchmaking as a group).
+    groups: crate::groups::Groups,
     /// Mutual friends (user ids) per user id, from the seat roster. `None` until a roster
     /// arrives (development: everyone online is a friend).
     friends: Option<HashMap<String, HashSet<String>>>,
@@ -174,6 +191,17 @@ struct State {
     swept: f64,
     /// Presence frames per stream in the current second (burst diagnostics).
     presence_rate: HashMap<StreamKey, (u64, [u32; 4])>,
+    /// Banned profiles, as user ids (a ticket name gives its id): the seat server's list plus
+    /// the bans of `ban_outbox`. Refused at sign-in, on every call and by the voice relay.
+    banned: HashSet<String>,
+    /// Banned addresses and when each ban ends (seconds): no sign-in from them until then.
+    banned_ips: HashMap<std::net::IpAddr, f64>,
+    /// Connections of a player banned while connected: nothing more is answered on them.
+    banned_conns: HashSet<ConnId>,
+    /// Bans made here that the seat server has not confirmed yet.
+    ban_outbox: Vec<BanReport>,
+    /// Wakes whoever delivers `ban_outbox`.
+    ban_signal: Arc<tokio::sync::Notify>,
 }
 
 struct Inner {
@@ -233,10 +261,16 @@ impl Core {
             friend_wait: HashMap::new(),
             deferred_sends: Sends::new(),
             seat_sessions: HashMap::new(),
+            groups: crate::groups::Groups::default(),
             friends: None,
             limiter: Limiter::default(),
             swept: 0.0,
             presence_rate: HashMap::new(),
+            banned: HashSet::new(),
+            banned_ips: HashMap::new(),
+            banned_conns: HashSet::new(),
+            ban_outbox: Vec::new(),
+            ban_signal: Arc::new(tokio::sync::Notify::new()),
             cfg,
         };
         Self { inner: Arc::new(Inner { state: Mutex::new(state), clock }) }
@@ -253,8 +287,14 @@ impl Core {
         self.run(|s, now| {
             let user = call.bearer.and_then(|t| s.tokens.subject(t, now as u64));
             debug!(conn = call.conn, stream = call.stream, path = call.path, peer = %call.peer, user = ?user, "open");
+            // A banned profile's tokens stay valid for hours: refused here, on every call.
+            if s.banned_conns.contains(&call.conn) || user.as_deref().is_some_and(|u| s.banned.contains(users::tail(u))) {
+                debug!(peer = %call.peer, path = call.path, "refused (banned)");
+                let _ = out.send(Out::status(code::PERMISSION_DENIED, BAN_MESSAGE));
+                return;
+            }
             let kind = kind_of(call.path);
-            let open_here = s.streams.keys().filter(|k| k.0 == call.conn).count();
+            let open_here =s.streams.keys().filter(|k| k.0 == call.conn).count();
             let subject = user.as_deref().map_or_else(|| format!("ip:{}", call.peer.ip()), |u| users::tail(u).to_owned());
             let refused = if open_here >= limits::caps::STREAMS_PER_CONNECTION {
                 Some("too many open streams on this connection")
@@ -377,6 +417,7 @@ impl Core {
             if let Some(user) = s.conn_user.remove(&conn) {
                 s.pending_social |= !s.conn_user.values().any(|u| *u == user);
             }
+            s.banned_conns.remove(&conn);
             s.flush(Sends::new());
         })
     }
@@ -468,7 +509,62 @@ impl Core {
             if !ticket.starts_with(&format!("{}.", ticket::PREFIX)) {
                 return None;
             }
-            s.ticket_name(ticket, now).ok().map(|(name, _)| users::ticket_user_id(&name))
+            s.ticket_name(ticket, now).ok().map(|(name, _)| users::ticket_user_id(&name)).filter(|uid| !s.banned.contains(uid))
+        })
+    }
+
+    /// Bans made here (name spoofing) that the seat server has not confirmed: deliver them
+    /// (`POST /seat/v1/lobby/bans`), then call [`Core::bans_delivered`].
+    pub fn pending_bans(&self) -> Vec<BanReport> {
+        self.run(|s, _| s.ban_outbox.clone())
+    }
+
+    /// The seat server has these bans now.
+    pub fn bans_delivered(&self, delivered: &[BanReport]) {
+        self.run(|s, _| s.ban_outbox.retain(|b| !delivered.contains(b)))
+    }
+
+    /// Bans to deliver that an earlier process made and could not (its queue file): enforced
+    /// from now, delivered with the rest.
+    pub fn requeue_bans(&self, bans: Vec<BanReport>) {
+        self.run(|s, _| {
+            for b in bans {
+                s.note_ban(&b);
+                if !s.ban_outbox.contains(&b) {
+                    s.ban_outbox.push(b);
+                }
+            }
+            s.ban_signal.notify_one();
+        })
+    }
+
+    /// Notified whenever a ban is made: deliver [`Core::pending_bans`] now.
+    pub fn ban_signal(&self) -> Arc<tokio::sync::Notify> {
+        self.run(|s, _| s.ban_signal.clone())
+    }
+
+    /// The seat server's bans in force: profile names, and addresses with the time (seconds
+    /// since 1970) each ban ends. Replaces what the Core enforced before (a ban the admin lifted
+    /// is lifted here too), except the bans still waiting in [`Core::pending_bans`]. A profile
+    /// banned by this list while it is connected is dropped like one the Core banned itself.
+    pub fn set_bans(&self, names: &[String], ips: &[(String, u64)]) {
+        self.run(|s, now| {
+            let before = std::mem::take(&mut s.banned);
+            s.banned = names.iter().map(|n| users::ticket_user_id(n)).collect();
+            s.banned_ips = ips
+                .iter()
+                .filter_map(|(ip, until)| Some((ip.parse::<std::net::IpAddr>().ok()?.to_canonical(), *until as f64)))
+                .filter(|(_, until)| now < *until)
+                .collect();
+            for b in s.ban_outbox.clone() {
+                s.note_ban(&b);
+            }
+            let mut sends = Sends::new();
+            let new: Vec<String> = s.banned.difference(&before).cloned().collect();
+            for uid in new {
+                s.expel(&uid, now, &mut sends);
+            }
+            s.flush(sends);
         })
     }
 
@@ -576,6 +672,8 @@ impl State {
         }
         let reply = match path {
             AUTH_SIGN_IN => self.sign_in(key, body, now),
+            AUTH_REFRESH => self.refresh_token(key, body, now),
+            DELEGATION => self.delegation(key, body, now),
             GS_ISSUE_TOKEN | GS_REFRESH_TOKEN => Ok(self.gamesync_token(key, body, now)),
             GS_GET_DOCUMENT => Ok(self.get_document(key, body, now)),
             GS_WRITE_DOCUMENTS => self.write_documents(key, body, now, sends),
@@ -613,7 +711,13 @@ impl State {
                     Ok(msgs::bulk_get_result(&names[names.len() - 1], game))
                 }
             }
-            _ => Ok(Vec::new()),
+            p if EMPTY_OK.contains(&p) => Ok(Vec::new()),
+            // An empty OK is fatal for any answer the game validates with an abort (issue #15):
+            // anything new is refused, and logged so it can be implemented.
+            _ => {
+                warn!(path, user = %subject, bytes = body.len(), body = %body.iter().take(64).map(|b| format!("{b:02x}")).collect::<String>(), "unimplemented unary call");
+                Err(Out::status(code::UNIMPLEMENTED, "not implemented by this server"))
+            }
         };
         match reply {
             Ok(message) => {
@@ -632,6 +736,10 @@ impl State {
         let (uid, name) = if token.starts_with(&format!("{}.", ticket::PREFIX)) {
             let (name, sid) = self.ticket_name(&token, now)?;
             let uid = users::ticket_user_id(&name);
+            if self.banned.contains(&uid) || self.ip_banned(key, now) {
+                warn!(user = %uid, name = %name, peer = ?self.streams.get(&key).map(|s| s.peer), "sign-in refused (banned)");
+                return Err(Out::status(code::PERMISSION_DENIED, BAN_MESSAGE));
+            }
             if let Some(sid) = sid {
                 self.seat_sessions.insert(uid.clone(), sid);
             }
@@ -647,13 +755,104 @@ impl State {
             self.users.set_name(&uid, name);
         }
         let access = self.tokens.mint(&user, Audience::Npln, now as u64);
+        let refresh = self.tokens.mint(&user, Audience::Npln, now as u64);
         let new_online = !self.conn_user.values().any(|u| *u == user);
         self.conn_user.insert(key.0, user.clone());
         info!(user = %uid, name = ?name, number, "signed in");
         if new_online {
             self.pending_social = true;
         }
-        Ok(msgs::sign_in_response(&user, &access, number))
+        Ok(msgs::sign_in_response(&user, &access, &refresh))
+    }
+
+    /// GameSessionService `IssueUserDelegationToken`: a follower's token to follow its leader. The
+    /// request names two user resources (fields 2 and 3: which is which isn't traced); the one that
+    /// isn't the caller is taken as the leader.
+    fn delegation(&mut self, key: StreamKey, body: &[u8], now: f64) -> Result<Vec<u8>, Out> {
+        let user = self.caller(key).ok_or_else(|| Out::status(code::UNAUTHENTICATED, "sign in again"))?;
+        let me = users::tail(&user).to_owned();
+        let named: Vec<Option<String>> = [2u32, 3].iter().map(|n| crate::wire::str_field(body, *n).ok().flatten()).collect();
+        let leader = named
+            .iter()
+            .flatten()
+            .filter_map(|r| msgs::user_resource_uid(r))
+            .map(|u| if u == "current" { me.as_str() } else { u })
+            .find(|u| *u != me)
+            .map(str::to_owned);
+        let actions = crate::wire::bytes_field(body, 5).ok().flatten().filter(|a| !a.is_empty()).map(<[u8]>::to_vec).unwrap_or_else(|| vec![1]);
+        let token = self.groups.issue(&me, leader.as_deref(), now);
+        info!(follower = %me, leader = ?leader, named = ?named, "delegation issued");
+        Ok(msgs::delegation_response(&named, &actions, &token))
+    }
+
+    /// A game-supplied string list (ticket, join, room creation): logged (the group flow is still
+    /// being learned), and our delegation tokens in it bind their followers to the caller.
+    fn group_strings(&mut self, uid: &str, body: &[u8], field: u32, what: &'static str, now: f64) {
+        let strings: Vec<String> = crate::wire::repeated_bytes(body, field)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|b| std::str::from_utf8(b).ok().map(str::to_owned))
+            .collect();
+        if strings.is_empty() {
+            return;
+        }
+        let shown: Vec<String> = strings.iter().take(8).map(|s| s.chars().take(64).collect()).collect();
+        info!(user = %uid, what, strings = ?shown, "game-supplied strings");
+        for follower in self.groups.from_strings(uid, &strings, now) {
+            info!(%follower, leader = %uid, via = "ticket", what, "group bound");
+        }
+    }
+
+    /// The game's `Companion` document (RE-MAP): `companion_state` 3 = follower of `leader_user_id`;
+    /// 0 (none), 1 and 2 (leader) end a follower bond.
+    fn companion_writes(&mut self, writer: &str, writes: &[Write], now: f64) {
+        for w in writes {
+            let Write::Update { name, fields, .. } = w else { continue };
+            if !name.contains("Companion") {
+                continue;
+            }
+            let Some(state) = fields.get("companion_state").and_then(|v| v.as_int()) else { continue };
+            let leader = fields.get("leader_user_id").and_then(|v| v.as_str()).map(|l| users::tail(l).to_owned()).filter(|l| !l.is_empty());
+            match (state, leader) {
+                (3, Some(leader)) => {
+                    if self.groups.bind(writer, &leader, "companion", now) {
+                        info!(follower = %writer, %leader, via = "companion", "group bound");
+                    }
+                }
+                (3, None) => info!(follower = %writer, "companion: follower without a leader_user_id"),
+                (s, _) => {
+                    if let Some(b) = self.groups.unbind(writer) {
+                        info!(user = %writer, state = s, old_leader = %b.leader, "group left (companion)");
+                    }
+                }
+            }
+        }
+    }
+
+    /// The lobby where someone of `uid`'s group sits, if any (placement keeps a group together).
+    fn group_lobby(&self, uid: &str, now: f64) -> Option<(LobbyId, String)> {
+        self.groups.others(uid, now).into_iter().find_map(|o| self.mm.lobby_of(&o).map(|l| (l, o)))
+    }
+
+    /// Auth `RefreshToken`: a new token for the same user. The user is proven by a token of ours in
+    /// the request (the refresh token we issued; earlier releases' "mkwmp-local-refresh-token-N"
+    /// isn't accepted, it proves nothing) or by the call's bearer. No proof: UNAUTHENTICATED, and
+    /// the game signs in again with its seat ticket.
+    fn refresh_token(&mut self, key: StreamKey, body: &[u8], now: f64) -> Result<Vec<u8>, Out> {
+        let from_body = msgs::texts(body).into_iter().find_map(|t| self.tokens.subject(&t, now as u64));
+        let proof = if from_body.is_some() { "refresh token" } else { "bearer" };
+        let Some(user) = from_body.or_else(|| self.caller(key)) else {
+            warn!(bytes = body.len(), body = %body.iter().take(64).map(|b| format!("{b:02x}")).collect::<String>(), "token refresh without a valid token");
+            return Err(Out::status(code::UNAUTHENTICATED, "sign in again"));
+        };
+        if self.banned.contains(users::tail(&user)) || (self.users.name(&user).is_some() && self.ip_banned(key, now)) {
+            return Err(Out::status(code::PERMISSION_DENIED, BAN_MESSAGE));
+        }
+        let access = self.tokens.mint(&user, Audience::Npln, now as u64);
+        let refresh = self.tokens.mint(&user, Audience::Npln, now as u64);
+        self.conn_user.insert(key.0, user.clone());
+        info!(user = %users::tail(&user), proof, "token refreshed");
+        Ok(msgs::sign_in_response(&user, &access, &refresh))
     }
 
     /// Display name from a seat ticket. Verified when keys are configured (always in
@@ -715,6 +914,28 @@ impl State {
         let writer = self.caller(key).map(|u| users::tail(&u).to_owned());
         let writer_number = writer.as_deref().map_or(1, |w| self.users.number(w));
         let writer_name = writer.as_deref().and_then(|w| self.users.name(w)).map(str::to_owned);
+        // The name a game writes for itself is its seat ticket's (the launcher's profile; both local
+        // players of a split-screen game write that one name into the seat's one document). Any other
+        // is a modified client claiming a name that is not its account's: banned, now and for good.
+        // Only for a ticket's name: a local test user has none. Another member's PlayerStatic is not
+        // a claim for oneself: `may_write` refuses it below, nothing more.
+        if let (Some(uid), Some(registered)) = (&writer, &writer_name) {
+            let all = req.writes.iter().chain(req.deferments.iter().flat_map(|d| &d.writes));
+            let claims: Vec<String> = all.filter_map(|w| claimed_name(w, uid, writer_number)).collect();
+            if let Some(claimed) = claims.iter().find(|c| !name_matches(registered, c)) {
+                if self.cfg.ban_enforce {
+                    self.ban_spoofer(key, uid, registered, claimed, now, sends);
+                    return Err(Out::status(code::PERMISSION_DENIED, BAN_MESSAGE));
+                }
+                // Watching the rule first: nothing happens to the player; the write goes on below with the
+                // ticket's name in place of the claimed one, as before. Lengths, not names, for the review.
+                let players = self.mm.lobby_of(uid).and_then(|l| self.mm.lobbies.get(&l)).and_then(|l| l.seat(uid)).map_or(0, |s| s.players);
+                warn!(user = %uid, ussid = writer_number, registered_len = registered.chars().count(), claimed_len = claimed.chars().count(),
+                      claimed_local = claimed.eq_ignore_ascii_case("Local"), players, "name spoofing (would ban)");
+            } else if !claims.is_empty() {
+                info!(user = %uid, ussid = writer_number, name = %registered, writes = claims.len(), "name written (the ticket's)");
+            }
+        }
         let number_of = |users: &mut Directory, name: &str| -> i64 {
             let id = users::tail(name);
             i64::from(if uuid::Uuid::parse_str(id).is_ok() { users.number(id) } else { writer_number })
@@ -751,9 +972,14 @@ impl State {
             return Ok(response);
         };
         let writer = writer.expect("scope implies writer");
+        self.companion_writes(&writer, &req.writes, now);
         let lobby = self.lobby_mut(&scope).expect("scope exists");
         let members = lobby.ussids();
         for write in &req.writes {
+            if !may_write(write.name(), &writer, writer_number) {
+                warn!(lobby = %lobby.id, user = %writer, name = %write.name(), "document refused (not the writer's own)");
+                continue;
+            }
             match write {
                 Write::Update { name, fields, mask, exists } => {
                     let mut fields = fields.clone();
@@ -796,7 +1022,9 @@ impl State {
         if let Some(seat) = lobby.seat_mut(&writer) {
             for d in &req.deferments {
                 if seat.deferments.len() < caps::DEFERMENTS_PER_SEAT || seat.deferments.contains_key(&d.name) {
-                    seat.deferments.insert(d.name.clone(), d.writes.clone());
+                    // what runs when the seat leaves: the same rule as a write now (its own PlayerStatic, never __us)
+                    let writes: Vec<Write> = d.writes.iter().filter(|w| may_write(w.name(), &writer, writer_number)).cloned().collect();
+                    seat.deferments.insert(d.name.clone(), writes);
                 }
             }
         }
@@ -870,6 +1098,7 @@ impl State {
         }
         let uid = users::tail(&user).to_owned();
         let tenant = users::tenant(&user).to_owned();
+        self.group_strings(&uid, body, 3, "matchmaking ticket", now);
         // One search per player: a repeated request while still gathering is the same ticket;
         // anything else ends the previous search / session.
         if let Some(old) = self.mm.ticket_of(&uid) {
@@ -901,8 +1130,20 @@ impl State {
             sends.push((key, Out::status(code::NOT_FOUND, "no such ticket")));
             return;
         };
-        let ussid = self.users.number(ticket.uid());
-        if let Some(a) = self.mm.track(id, key, ussid, now) {
+        let uid = ticket.uid().to_owned();
+        let ussid = self.users.number(&uid);
+        let prefer = if ticket.lobby.is_none() { self.group_lobby(&uid, now) } else { None };
+        if let Some((lobby, with)) = &prefer {
+            info!(user = %uid, %lobby, with = %with, "group placement: joining the group's lobby");
+        }
+        let prefer = prefer.map(|(l, _)| l);
+        let a = self.mm.track(id, key, ussid, now, prefer);
+        if let (Some(want), Some(got)) = (prefer, self.mm.tickets.get(&id).and_then(|t| t.lobby)) {
+            if want != got {
+                warn!(user = %uid, want = %want, got = %got, "group placement: the group's lobby can't take this ticket; placed elsewhere");
+            }
+        }
+        if let Some(a) = a {
             self.assign(a, now, sends);
         }
     }
@@ -1126,6 +1367,7 @@ impl State {
     fn room_create(&mut self, key: StreamKey, body: &[u8], now: f64) -> Result<Vec<u8>, Out> {
         let user = self.caller(key).ok_or_else(|| Out::status(code::UNAUTHENTICATED, "not signed in"))?;
         let req = msgs::parse_room_request(body).ok_or_else(|| Out::status(code::INVALID_ARGUMENT, "invalid room request"))?;
+        self.group_strings(users::tail(&user), body, 3, "room creation", now);
         if msgs::unsupported_mode(&req.mode) {
             warn!(user = %users::tail(&user), mode = %req.mode, "room refused: mode not supported yet");
             return Err(Out::status(code::FAILED_PRECONDITION, "this mode is not available on this server yet"));
@@ -1239,6 +1481,7 @@ impl State {
         let req = msgs::parse_join(body).ok_or_else(|| Out::status(code::INVALID_ARGUMENT, "invalid join request"))?;
         let lobby_id = uuid::Uuid::parse_str(&req.lobby).map_err(|_| Out::status(code::NOT_FOUND, "no such game session"))?;
         let uid = users::tail(&user).to_owned();
+        self.group_strings(&uid, body, 4, "join", now);
         let players = req.players.len().max(1);
         let game = req.players.first().and_then(|p| msgs::player_game(p).0);
         self.note_game(&uid, game);
@@ -1388,7 +1631,90 @@ impl State {
         }
     }
 
+    // ---- bans ------------------------------------------------------------------------------
+
+    /// Enforce a ban from now: the profile for good, its address until 14 days after the ban.
+    fn note_ban(&mut self, b: &BanReport) {
+        self.banned.insert(users::ticket_user_id(&b.name));
+        if let Some(ip) = b.ip.as_deref().and_then(|ip| ip.parse::<std::net::IpAddr>().ok()) {
+            let until = b.at as f64 + IP_BAN_SECS;
+            let e = self.banned_ips.entry(ip.to_canonical()).or_insert(until);
+            *e = e.max(until);
+        }
+    }
+
+    /// Is the address of this stream's connection banned now?
+    fn ip_banned(&self, key: StreamKey, now: f64) -> bool {
+        self.streams.get(&key).is_some_and(|s| self.banned_ips.get(&s.peer.to_canonical()).is_some_and(|until| now < *until))
+    }
+
+    /// A game wrote `claimed` as its own name while its seat ticket says `registered`: ban the
+    /// profile and the address, tell the seat server, drop the player.
+    fn ban_spoofer(&mut self, key: StreamKey, uid: &str, registered: &str, claimed: &str, now: f64, sends: &mut Sends) {
+        let peer = self.streams.get(&key).map(|s| s.peer.to_canonical());
+        let lobby = self.mm.lobby_of(uid).map_or_else(|| "-".to_owned(), |l| l.to_string());
+        let ussid = self.users.number(uid);
+        let shown: String = claimed.chars().take(64).collect();
+        warn!(lobby = %lobby, user = %uid, ussid, registered = %registered, claimed = ?shown,
+              peer = %peer.map_or_else(|| "-".to_owned(), |p| p.to_string()), "name spoofing: profile and address banned");
+        let ban = BanReport {
+            name: registered.to_owned(),
+            // Loopback is this machine (a local test, a proxy): never an address to ban.
+            ip: peer.filter(|ip| !ip.is_loopback() && !ip.is_unspecified()).map(|ip| ip.to_string()),
+            reason: "name spoofing".into(),
+            detail: format!("claimed {shown:?} in lobby {lobby} (ussid {ussid})"),
+            at: now as u64,
+        };
+        self.note_ban(&ban);
+        self.ban_outbox.push(ban);
+        self.ban_signal.notify_one();
+        self.expel(uid, now, sends);
+    }
+
+    /// Drop a banned player now: its seats leave the normal way (every other member gets its
+    /// documents and its `__us` entry REMOVED, the host is handed over) without the reconnect
+    /// grace, its search and group end, friends see it offline, every stream of its connections
+    /// ends and those connections get no further answer.
+    fn expel(&mut self, uid: &str, now: f64, sends: &mut Sends) {
+        let seated: Vec<LobbyId> = self.mm.lobbies.values().filter(|l| l.seat(uid).is_some()).map(|l| l.id).collect();
+        for lobby in seated {
+            self.leave(lobby, uid, "banned", now, sends);
+        }
+        while let Some(t) = self.mm.ticket_of(uid).map(|t| t.id) {
+            self.end_trackers(t, code::PERMISSION_DENIED, sends);
+            self.mm.cancel(t);
+        }
+        self.groups.unbind(uid);
+        self.solos.remove(uid);
+        self.seat_sessions.remove(uid);
+        if let Some(f) = self.friends.as_mut() {
+            f.remove(uid);
+        }
+        let mine = |u: &String| users::tail(u) == uid;
+        let conns: HashSet<ConnId> = self.conn_user.iter().filter(|(_, u)| mine(u)).map(|(c, _)| *c)
+            .chain(self.session_user.iter().filter(|(_, u)| *u == uid).map(|(k, _)| k.0))
+            .chain(self.streams.iter().filter(|(_, s)| s.user.as_ref().is_some_and(mine)).map(|(k, _)| k.0))
+            .collect();
+        let mut keys: Vec<StreamKey> = self.streams.keys().filter(|k| conns.contains(&k.0)).copied().collect();
+        keys.sort_unstable();
+        for k in keys {
+            self.stream_ended(k, now);
+            sends.push((k, Out::status(code::PERMISSION_DENIED, BAN_MESSAGE)));
+        }
+        if self.social.presences.get(uid).is_some_and(|p| p.online) {
+            let user = self.social.presences[uid].user.clone();
+            self.social.set_online(uid, &user, false);
+            self.push_presence(uid, sends);
+        }
+        self.conn_user.retain(|_, u| users::tail(u) != uid);
+        self.session_user.retain(|_, u| u != uid);
+        self.banned_conns.extend(conns);
+        self.pending_social = true;
+    }
+
     fn tick(&mut self, now: f64) {
+        self.banned_ips.retain(|_, until| now < *until);
+        self.groups.sweep(now);
         let mut sends = Sends::new();
         for a in self.mm.tick(now) {
             self.assign(a, now, &mut sends);
@@ -1537,6 +1863,45 @@ fn answer(lobby: &mut Lobby, cfg: &CoreConfig, policy: &Policy, w: Watcher, uid:
 
 /// `__us/<id>` (SDK parser FUN_0128b2b4, game parser FUN_02255158). `st` 2 = present; the
 /// member listener (FUN_02254e4c) erases members with any other state.
+/// May a member's game write (or delete) this document? `__us/*` is the server's: each member's identity, written only
+/// from its session (research/docs/LOBBY-ROSTER-1.8.0.md 1). `PlayerStatic/<n>` carries the name others see: only the
+/// member it is named after (by ussid, or by uid) may write it, so nobody puts a name or a station id on another seat.
+fn may_write(name: &str, writer: &str, writer_ussid: u32) -> bool {
+    if name.starts_with(US_PREFIX) {
+        return false;
+    }
+    match name.strip_prefix(PLAYER_STATIC) {
+        Some(id) => id == writer || id.parse::<u32>().is_ok_and(|n| n == writer_ussid),
+        None => true,
+    }
+}
+
+/// The name a write claims for its writer: the `name` it sets in the writer's own
+/// `PlayerStatic/<ussid>` (or `/<uid>`). `None`: not such a write, or no name in it (an empty one
+/// claims nothing).
+fn claimed_name(write: &Write, writer: &str, writer_ussid: u32) -> Option<String> {
+    let Write::Update { name, fields, .. } = write else { return None };
+    let id = name.strip_prefix(PLAYER_STATIC)?;
+    if !(id == writer || id.parse::<u32>().is_ok_and(|n| n == writer_ussid)) {
+        return None;
+    }
+    let claimed = match fields.get("name")? {
+        Value::Str(s) => s.clone(),
+        Value::Bytes(b) => String::from_utf8_lossy(b).into_owned(),
+        _ => return None,
+    };
+    let claimed = claimed.trim_matches(|c: char| c.is_whitespace() || c == '\0');
+    (!claimed.is_empty()).then(|| claimed.to_owned())
+}
+
+/// Is `claimed` the registered name? Compared trimmed and without case. The start of the registered name counts as
+/// the name: the game may cut a nickname (the console's 10 characters; the field's 64 UTF-8 bytes), and a cut name
+/// is nobody else's. Anything else (another name, "Local" from an old mod) is a mismatch.
+fn name_matches(registered: &str, claimed: &str) -> bool {
+    let (registered, claimed) = (registered.trim().to_lowercase(), claimed.trim().to_lowercase());
+    !claimed.is_empty() && registered.starts_with(&claimed)
+}
+
 fn user_session_document(name: &str, uid: &str, ussid: u32, upcsid: u64, pgn: &str, now: u64) -> Document {
     let fields = Fields::new()
         .with("uid", Value::str(uid))
@@ -1595,4 +1960,34 @@ fn unverified_ticket_name(token: &str) -> Option<(String, Option<String>)> {
 fn _assert_send_sync() {
     fn is<T: Send + Sync>() {}
     is::<Core>();
+}
+
+#[cfg(test)]
+mod name_tests {
+    use super::*;
+
+    #[test]
+    fn a_claimed_name_is_the_registered_one_without_case_or_its_start() {
+        assert!(name_matches("Alex", "alex") && name_matches("Alex", " ALEX ") && name_matches("Zoë", "ZOË"));
+        assert!(!name_matches("Alex", "Alexa") && !name_matches("Alex", "Bia") && !name_matches("Alex", "Local"));
+        // a nickname the game cut (10 characters, or the field's 64 bytes) is still the player's own
+        assert!(name_matches("Turbo_Racer_99", "Turbo_Race") && name_matches("Alexa", "Alex"));
+        let long = "é".repeat(40);
+        assert!(name_matches(&long, &"é".repeat(32)) && name_matches(&long, &long) && !name_matches(&long, &"é".repeat(41)));
+        assert!(!name_matches("Alex", "") && !name_matches("Alex", "lex"));
+    }
+
+    #[test]
+    fn only_a_name_in_the_writers_own_player_static_is_a_claim() {
+        let w = |doc: &str, f: Fields| Write::Update { name: doc.into(), fields: f, mask: None, exists: None };
+        let name = |n: &str| Fields::new().with("name", Value::str(n));
+        assert_eq!(claimed_name(&w("docs/PlayerStatic/7", name("Bia")), "uid", 7).as_deref(), Some("Bia"));
+        assert_eq!(claimed_name(&w("docs/PlayerStatic/uid", name(" Bia\0")), "uid", 7).as_deref(), Some("Bia"));
+        assert_eq!(claimed_name(&w("docs/PlayerStatic/7", Fields::new().with("name", Value::Bytes(b"Bia".to_vec()))), "uid", 7).as_deref(), Some("Bia"));
+        assert_eq!(claimed_name(&w("docs/PlayerStatic/8", name("Bia")), "uid", 7), None, "another member's: refused, not a claim");
+        assert_eq!(claimed_name(&w("docs/Companion/7", name("Bia")), "uid", 7), None);
+        assert_eq!(claimed_name(&w("docs/PlayerStatic/7", Fields::new().with("vehicle", Value::Int(1))), "uid", 7), None);
+        assert_eq!(claimed_name(&w("docs/PlayerStatic/7", name("  ")), "uid", 7), None, "an empty name claims nothing");
+        assert_eq!(claimed_name(&Write::Delete { name: "docs/PlayerStatic/7".into() }, "uid", 7), None);
+    }
 }

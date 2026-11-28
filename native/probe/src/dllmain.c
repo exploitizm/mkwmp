@@ -9,8 +9,9 @@
 // DllMain runs at process init, before the exe entry point, i.e. before the recomp's ldr_load.
 //
 // Unless MKWMP runs as a mkw-recomp mod in this game (modmode.h): then this DLL only forwards winmm.
+#include "breadcrumbs.h"
 #include "coff.h"
-#include "keypad.h"
+#include "crash.h"
 #include "log.h"
 #include "modmode.h"
 #include "plat.h"
@@ -35,7 +36,8 @@ static int mod_enabled(char *plugin, size_t cap) {
     return modmode_mod_enabled(&in, plugin, cap);
 }
 
-// The start-up shared with the plugin loader is probe.c's; only the COFF resolve and the keypad are this loader's.
+// The start-up shared with the plugin loader is probe.c's; only the COFF resolve is this loader's. Nothing is drawn
+// into the game and no input is read: the game's (and mkw-recomp's) own UI does its thing.
 static void probe_init(void) {
     // The mod wins: decided first, before the environment file, any override and any hook. Reading mkw.exe's symbol
     // table changes nothing in the process; it only says whether this runtime loads plugins at all (0.1.15 on).
@@ -51,15 +53,20 @@ static void probe_init(void) {
         }
     }
     probe_log_start();
+    // Crash records (crash.h), before anything of ours can fault. From DllMain this is before mkw.exe's own start-up,
+    // so the runtime's fault handler will be ahead of ours: every access violation ours sees is one it declined.
+    crash_install(NULL, 1);
+    crumb_state("loader", "winmm");
     if (mod)
         mkwmp_log("the MKWMP mod is enabled (%s) but this mkw-recomp has no plugin loader: winmm.dll stays in charge",
                   plugin);
     if (resolved < 0) resolved = coff_resolve_runtime();
     if (resolved) {
         log_line("runtime resolved from COFF symbols");
+        // the runtime's "guest Cpu of this thread" (kern_cpu), for the guest registers of a crash record
+        crash_set_guest_cpu((void *(*)(void))(uintptr_t)coff_symbol("kern_cpu"));
         log_kv("hostfn_add_override", (uint64_t)(uintptr_t)g_rt.override);
         probe_register();
-        keypad_install();   // x64 detours of runtime functions: needs no override slot
     } else {
         log_line("ERROR: failed to resolve recomp runtime; probe inactive");
     }

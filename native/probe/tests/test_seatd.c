@@ -36,6 +36,15 @@ static int req(const char *method, const char *path, const char *json, const cha
     return seatd_request(method, path, json, buf, sizeof buf, body);
 }
 
+// The room seat.c hands on (probe.c: to the crash record's breadcrumbs).
+static struct { int calls; char lobby[40]; uint32_t ussid, ussids[8]; int n; uint64_t at; } g_room;
+static void room_sink(const char *lobby, uint32_t ussid, const uint32_t *ussids, int n, uint64_t at) {
+    g_room.calls++;
+    snprintf(g_room.lobby, sizeof g_room.lobby, "%s", lobby ? lobby : "");
+    g_room.ussid = ussid, g_room.n = n < 8 ? n : 8, g_room.at = at;
+    for (int i = 0; i < g_room.n; i++) g_room.ussids[i] = ussids[i];
+}
+
 int main(int argc, char **argv) {
     if (argc != 3) return 2;
     plat_set_home(argv[2]);
@@ -73,8 +82,23 @@ int main(int argc, char **argv) {
     assert(strstr(pem, "-----BEGIN CERTIFICATE-----"));
     char ticket[sizeof r.ticket];
     snprintf(ticket, sizeof ticket, "%s", r.ticket);
+    // the join's view has no room yet: "room": null, which seat.c reads as in none
+    seat_set_room_sink(room_sink);
+    assert(strstr(body, "\"room\":null}"));
+    seat_parse_room(body);
+    assert(g_room.calls == 1 && !g_room.lobby[0]);
     seat_parse(req("POST", "/local/v1/seat", NULL, &body), body, &r);   // the heartbeat: the same session
-    assert(r.state == SEAT_SEATED && !strcmp(r.ticket, ticket));
+    assert(r.state == SEAT_SEATED && !strcmp(r.ticket, ticket) && !strcmp(r.lobby, "lobby.example:443"));
+    // the heartbeat's view has the room the lobby reported: passed on whole, with its "at"
+    assert(strstr(body, "\"room\":{\"lobby\": \"0b4e7a10-1111-4222-8333-444455556666\"") ||
+           strstr(body, "\"room\":{\"lobby\":\"0b4e7a10-1111-4222-8333-444455556666\""));
+    seat_parse_room(body);
+    assert(g_room.calls == 2 && !strcmp(g_room.lobby, "0b4e7a10-1111-4222-8333-444455556666") && g_room.ussid == 12);
+    assert(g_room.n == 3 && g_room.ussids[0] == 3 && g_room.ussids[1] == 12 && g_room.ussids[2] == 16);
+    assert(g_room.at == 1763647200123ull);
+    seat_set_room_sink(NULL);
+    printf("the room passes from the seat server to seat.c: lobby, ussid 12 of 3,12,16, at %llu\n",
+           (unsigned long long)g_room.at);
 
     // the game's exit gives the seat back: one seat fewer taken on the server
     SeatApiStatus st;
@@ -99,7 +123,7 @@ int main(int argc, char **argv) {
     seatd_start(&c);   // the next game: the mute is still there
     assert(req("GET", "/local/v1/voice", NULL, &body) == 200 && strstr(body, "\"account\":\"42\",\"name\":\"Luz\""));
     SeatdMute m[4];
-    assert(seatd_mutes(m, 4) == 1 && m[0].account == 42 && !strcmp(m[0].name, "Luz"));   // the Voice chat tab's list
+    assert(seatd_mutes(m, 4) == 1 && m[0].account == 42 && !strcmp(m[0].name, "Luz"));   // the mod's mute list
     assert(req("POST", "/local/v1/voice/mute", "{\"account\":\"42\",\"name\":\"Luz\",\"muted\":false}", &body) == 204);
     assert(req("GET", "/local/v1/voice", NULL, &body) == 200 && !strstr(body, "\"account\":\"42\""));
     assert(!s_get("mutes.1", kept, sizeof kept));
@@ -120,7 +144,7 @@ int main(int argc, char **argv) {
     }
     printf("mutes kept in the mod's settings across games (64)\n");
     assert(req("GET", "/local/v1/room", NULL, &body) == 404);
-    // the devices the engine reports, for the Voice chat tab; the tab's settings reach voice.c at its next poll
+    // the devices the engine reports; the voice settings reach voice.c at its next poll
     assert(req("POST", "/local/v1/voice/devices", "{\"inputs\":[{\"id\":\"mic1\",\"name\":\"Mic\"}],\"outputs\":[]}", &body) == 204);
     char dev[256];
     assert(seatd_devices_json(dev, sizeof dev) && strstr(dev, "mic1"));

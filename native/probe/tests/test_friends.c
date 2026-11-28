@@ -84,6 +84,62 @@ static void test_parse(void) {
     assert(friends_parse(200, big, NULL, &r) && r.count == FRIENDS_MAX && !strcmp(r.e[99].name, "player99"));
 }
 
+// An entry's own "account" (the launcher on Nextendo: docs/contracts/NEXTENDO_API.md, section 4).
+static void test_parse_account(void) {
+    uint64_t id = 7;
+    assert(friends_account_hex("0123456789abcdef", &id) && id == 0x0123456789abcdefull);
+    assert(friends_account_hex("FEDCBA9876543210", &id) && id == 0xfedcba9876543210ull);   // either case, the top bit too
+    assert(friends_account_hex("1f", &id) && id == 0x1f);
+    id = 7;
+    assert(!friends_account_hex("", &id) && !friends_account_hex("0", &id) && !friends_account_hex("0000000000000000", &id));
+    assert(!friends_account_hex("0123456789abcdef0", &id) && !friends_account_hex("0x1f", &id) && !friends_account_hex("1g", &id));
+    assert(!friends_account_hex(" 1f", &id) && !friends_account_hex("1f ", &id) && !friends_account_hex("-1", &id) && id == 7);
+
+    // the id is used as it is, whatever the name; without one the name's id, as ever (an MKWMP launcher sends none)
+    FriendRoster r;
+    assert(friends_parse(200, "{\"friends\":[{\"name\":\"Ana\",\"online\":true,\"account\":\"8a0b0c0d0e0f1011\"},"
+                              "{\"account\":\"00000000000000AA\",\"name\":\"Bia\"},{\"name\":\"Caio\"}]}", NULL, &r));
+    assert(r.count == 3 && r.e[0].account_id == 0x8a0b0c0d0e0f1011ull && !strcmp(r.e[0].name, "Ana"));
+    assert(r.e[1].account_id == 0xaa && !strcmp(r.e[1].name, "Bia"));
+    assert(r.e[2].account_id == friends_account_id("Caio") && !strcmp(r.e[2].name, "Caio"));
+
+    // Nextendo mode: only entries with an id; a name is not an id there, and nobody is left out by name
+    assert(friends_parse_accounts(200, "{\"friends\":[{\"name\":\"Ana\",\"online\":true,\"account\":\"8a0b0c0d0e0f1011\"},"
+                                       "{\"name\":\"Caio\"},{\"name\":\"bia\",\"account\":\"aa\"}]}", &r));
+    assert(r.count == 2 && r.e[0].account_id == 0x8a0b0c0d0e0f1011ull && r.e[1].account_id == 0xaa && !strcmp(r.e[1].name, "bia"));
+    assert(friends_parse_accounts(200, "{\"friends\":[{\"name\":\"Ana\"},{\"name\":\"Bia\",\"online\":true}]}", &r) && r.count == 0);
+    assert(friends_parse_accounts(200, "{\"friends\":[]}", &r) && r.count == 0);   // what the launcher answers today
+
+    // an "account" that is not an id drops the entry (in both modes: it is never guessed from the name); the same id
+    // twice is one friend; a name the game cannot take (none, too long, an escape) does not lose a friend with an id
+    static const char kMixed[] =
+        "{\"friends\":[{\"name\":\"A\",\"account\":\"\"},{\"name\":\"B\",\"account\":\"0\"},{\"name\":\"C\",\"account\":31},"
+        "{\"name\":\"D\",\"account\":\"12345678901234567\"},{\"name\":\"E\",\"account\":\"zz\"},{\"name\":\"F\",\"account\":null},"
+        "{\"name\":\"G\",\"account\":\"1\\u0066\"},{\"name\":\"H\",\"account\":[\"1f\"]},"
+        "{\"name\":\"One\",\"account\":\"1\"},{\"name\":\"Uno\",\"account\":\"0000000000000001\"},"
+        "{\"account\":\"2\"},{\"name\":\"\",\"account\":\"3\"},{\"name\":\"abcdefghijklmnopqrstu\",\"account\":\"4\"},"
+        "{\"name\":\"Zo\\u00eb\",\"account\":\"5\"},{\"name\":\"Zo\xc3\xab \\\"Z\\\" <3\",\"account\":\"6\"}]}";
+    assert(friends_parse_accounts(200, kMixed, &r));
+    assert(r.count == 6 && r.e[0].account_id == 1 && !strcmp(r.e[0].name, "One"));
+    for (int i = 1; i <= 4; i++) assert(r.e[i].account_id == (uint64_t)i + 1 && !strcmp(r.e[i].name, "Player"));
+    assert(r.e[5].account_id == 6 && !strcmp(r.e[5].name, "Zo\xc3\xab \"Z\" <3"));
+    assert(friends_parse(200, kMixed, NULL, &r) && r.count == 6 && r.e[0].account_id == 1);
+
+    // still no more than 100, and the Friend structs carry the ids as they came
+    static char big[16384];
+    int n = sprintf(big, "{\"friends\":[");
+    for (int i = 0; i < 130; i++)
+        n += sprintf(big + n, "%s{\"name\":\"player%d\",\"online\":false,\"account\":\"%016llx\"}", i ? "," : "", i,
+                     0x8000000000000100ull + (unsigned long long)i);
+    sprintf(big + n, "]}");
+    assert(friends_parse_accounts(200, big, &r) && r.count == FRIENDS_MAX && r.e[99].account_id == 0x8000000000000163ull);
+    const uint64_t owner[2] = {0x1111, 0x2222};
+    static GFriend page[10];
+    assert(friends_page(&r, owner, 90, 10, page) == 10 && friends_page(&r, owner, 100, 10, page) == 0);
+    assert(page[9].account_id == 0x8000000000000163ull && !strcmp(page[9].nickname, "player99") && page[9].is_valid == 1);
+    assert(!friends_parse_accounts(503, "{\"state\":\"loading\"}", &r) && r.count == FRIENDS_MAX);   // kept
+}
+
 static void test_page(void) {
     static FriendRoster r;
     static char body[4096];
@@ -134,12 +190,59 @@ static void test_page(void) {
     assert(friends_list(owner, 0, 10, page) == 0);
 }
 
+// Nextendo: the server's accounts (nxfriends.c) merged with the launcher's entries, and the names they get.
+static void test_server_accounts(void) {
+    static FriendRoster known, names, out;
+    const char body[] = "{\"friends\":[{\"name\":\"Luna\",\"account\":\"00000000000000aa\"},{\"name\":\"Bia\"},"
+                        "{\"name\":\"Bia\"},{\"name\":\"\",\"online\":true},{\"name\":\"Rui\",\"account\":\"zz\"}]}";
+    assert(friends_parse_accounts(200, body, &known) && known.count == 1 && known.e[0].account_id == 0xaa);
+    // names only: an entry with a name and no "account", once; a bad "account" is no name either
+    assert(friends_parse_names(200, body, &names) && names.count == 1 && !strcmp(names.e[0].name, "Bia"));
+    assert(names.e[0].account_id == 0);
+    assert(!friends_parse_names(503, body, &names) && names.count == 1);
+
+    // one account left over and one name left over: they are the same friend
+    const uint64_t one[] = {0xaa, 0xbb};
+    assert(friends_merge(&known, &names, one, 2, &out) == 1 && out.count == 2);
+    assert(out.e[0].account_id == 0xaa && !strcmp(out.e[0].name, "Luna"));
+    assert(out.e[1].account_id == 0xbb && !strcmp(out.e[1].name, "Bia"));
+    // more accounts than that, or no name: numbered
+    const uint64_t three[] = {0xbb, 0, 0xcc, 0xaa, 0xbb};
+    assert(friends_merge(&known, &names, three, 5, &out) == 2 && out.count == 3);
+    assert(out.e[1].account_id == 0xbb && !strcmp(out.e[1].name, "Friend 1"));
+    assert(out.e[2].account_id == 0xcc && !strcmp(out.e[2].name, "Friend 2"));
+    assert(friends_merge(&known, NULL, one, 2, &out) == 1 && !strcmp(out.e[1].name, "Friend 1"));
+    static FriendRoster two_names;
+    assert(friends_parse_names(200, "{\"friends\":[{\"name\":\"Bia\"},{\"name\":\"Rui\"}]}", &two_names) && two_names.count == 2);
+    assert(friends_merge(&known, &two_names, one, 2, &out) == 1 && !strcmp(out.e[1].name, "Friend 1"));
+    // nothing from the server: the launcher's entries as they are; a full list takes no more
+    assert(friends_merge(&known, &names, NULL, 0, &out) == 0 && out.count == 1);
+    static FriendRoster full;
+    static uint64_t many[FRIENDS_MAX + 5];
+    for (int i = 0; i < FRIENDS_MAX + 5; i++) many[i] = 0x1000u + (unsigned)i;
+    full.count = 0;
+    assert(friends_merge(&full, NULL, many, FRIENDS_MAX + 5, &out) == FRIENDS_MAX && out.count == FRIENDS_MAX);
+    assert(!strcmp(out.e[FRIENDS_MAX - 1].name, "Friend 100"));
+
+    // GetFriendList serves them (no launcher roster here), and stops when they are taken back
+    const uint64_t owner[2] = {1, 2};
+    static GFriend page[10];
+    friends_set_server(one, 2);
+    assert(friends_list(owner, 0, 10, page) == 2 && page[0].account_id == 0xaa && page[1].account_id == 0xbb);
+    assert(!strcmp(page[0].nickname, "Friend 1") && page[1].is_valid == 1);
+    assert(friends_list(owner, 2, 10, page) == 0);
+    friends_set_server(NULL, 0);
+    assert(friends_list(owner, 0, 10, page) == 0);
+}
+
 static void test_lobby_ca_decode(void);
 int main(void) {
+    test_server_accounts();
     test_sha1();
     test_lobby_ca_decode();
     test_account_id();
     test_parse();
+    test_parse_account();
     test_page();
     puts("friends: sha1, uuid5, account ids, roster parsing and Friend paging passed");
     return 0;

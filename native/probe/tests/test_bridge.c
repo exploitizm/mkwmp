@@ -3,9 +3,9 @@
 //
 //   $zig = "C:\Users\alcmo\tools\zig-x86_64-windows-0.15.2\zig.exe"; $s = "native\probe\src"
 //   & $zig cc -target x86_64-windows-gnu -O2 -Wall -Wextra -Werror -o scratch\test_bridge.exe `
-//       native\probe\tests\test_bridge.c native\probe\tests\stub_coff.c $s\log.c $s\config.c $s\notify.c `
-//       $s\friends.c $s\lobby_ca.c $s\seat.c $s\voice.c $s\voice_ui.c $s\guesthook.c $s\gameaddrs.c `
-//       $s\launcher.c $s\uuid5.c $s\plat_win.c $s\plat_net_win.c -lws2_32
+//       native\probe\tests\test_bridge.c native\probe\tests\stub_coff.c $s\log.c $s\breadcrumbs.c $s\config.c $s\notify.c `
+//       $s\friends.c $s\lobby_ca.c $s\nextendo.c $s\seat.c $s\voice.c $s\guesthook.c $s\gameaddrs.c $s\nxfriends.c `
+//       $s\kartrace.c $s\roster.c $s\rosterhook.c $s\launcher.c $s\uuid5.c $s\plat_win.c $s\plat_net_win.c -lws2_32
 //   scratch\test_bridge.exe
 #undef NDEBUG
 #include <assert.h>
@@ -170,6 +170,27 @@ int main(void) {
     dns.x[0] = (uintptr_t)"capture.local";
     ov_sock_getaddrinfo_cpp(&dns);
     assert(dns.x[0] == 0 && ai == &g_typed_ai[1].ai && typed_first->ai_family == 2);
+    {
+        // On an MKWMP server every name is the lobby (here the default 127.0.0.1:8900): the console maker's names, a
+        // gamesync name, an address. Port 443 and no port are the lobby's; any other port is kept.
+        assert(!g_nextendo && g_server.sin_addr.s_addr == htonl(INADDR_LOOPBACK));
+        static const char *const kNames[] = {"t-e96531c6-lp1.lp1.t.npln.srv.nintendo.net", "gamesync.npln.nintendo.net",
+                                             "nncs2-lp1.n.n.srv.nintendo.net", "example.org", "203.0.113.7"};
+        static const struct { const char *service; unsigned port; } kPorts[] = {{NULL, 0}, {"443", 0}, {"8906", 8906}, {"https", 0}};
+        for (size_t i = 0; i < sizeof kNames / sizeof kNames[0]; i++)
+            for (size_t k = 0; k < sizeof kPorts / sizeof kPorts[0]; k++)
+                for (int typed = 0; typed < 2; typed++) {
+                    Cpu q = {0};
+                    GAddrInfo *r = NULL;
+                    q.x[0] = (uintptr_t)kNames[i]; q.x[1] = (uintptr_t)kPorts[k].service; q.x[3] = (uintptr_t)&r;
+                    (typed ? ov_sock_getaddrinfo_cpp : ov_sock_getaddrinfo)(&q);
+                    assert(q.x[0] == 0 && r);
+                    const uint8_t *sa = typed ? (const uint8_t *)r->ai_canonname : r->ai_addr;
+                    uint16_t want = kPorts[k].port ? htons((uint16_t)kPorts[k].port) : g_server.sin_port;
+                    assert(sa[0] == 16 && sa[1] == 2 && !memcmp(sa + 2, &want, 2) && !memcmp(sa + 4, "\x7f\0\0\1", 4));
+                    if (!typed) call2(ov_sock_freeaddrinfo, (uintptr_t)r, 0);
+                }
+    }
     Cpu sock = {0}; ov_sock_socket(&sock); fd = (int)sock.x[0];
     int32_t option = 1; uint32_t length = 4;
     sock.x[0] = fd; sock.x[1] = 6; sock.x[2] = 1;
@@ -335,6 +356,174 @@ int main(void) {
     assert(kart_moves == 20 && dispatched == 7);
     g_no_idle_kick = 0;
     memset(&A, 0, sizeof A);
+    {
+        // nnsocketConnect. MKWMP server: always the lobby's address; port 443 becomes the lobby's port, any other
+        // explicit port is kept. Nextendo Network: the address and port the game asks for, as they are.
+        SOCKET lis = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        struct sockaddr_in la = {0}; la.sin_family = AF_INET; la.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        int ll = sizeof la;
+        assert(!bind(lis, (struct sockaddr *)&la, sizeof la) && !getsockname(lis, (struct sockaddr *)&la, &ll) && !listen(lis, 4));
+        uint16_t lobby_port = g_server.sin_port, https = htons(443), bogus = htons(1);
+        uint8_t want[16] = {16, 2, 0, 0, 203, 0, 113, 7};   // console sockaddr_in: 203.0.113.7
+        struct { const uint16_t *server_port, *guest_port; } mkwmp[] = {{&la.sin_port, &https}, {&bogus, &la.sin_port}};
+        for (int i = 0; i < 2; i++) {
+            g_server.sin_port = *mkwmp[i].server_port;
+            memcpy(want + 2, mkwmp[i].guest_port, 2);
+            Cpu k = {0}; ov_sock_socket(&k); int cfd = (int)k.x[0];
+            k.x[0] = cfd; k.x[1] = (uintptr_t)want; k.x[2] = sizeof want;
+            ov_sock_connect(&k);
+            assert(k.x[0] == 0 || (k.x[0] == UINT64_MAX && g_errno == G_EINPROGRESS));
+            SOCKET got = accept(lis, NULL, NULL);   // 203.0.113.7 was never tried: the lobby's loopback answered
+            assert(got != INVALID_SOCKET);
+            closesocket(got); call2(ov_sock_close, cfd, 0);
+        }
+        g_nextendo = 1;
+        g_server.sin_port = bogus;
+        uint8_t ask[16] = {16, 2, 0, 0, 127, 0, 0, 1};
+        memcpy(ask + 2, &la.sin_port, 2);
+        Cpu k = {0}; ov_sock_socket(&k); int cfd = (int)k.x[0];
+        k.x[0] = cfd; k.x[1] = (uintptr_t)ask; k.x[2] = sizeof ask;
+        ov_sock_connect(&k);
+        assert(k.x[0] == 0 || (k.x[0] == UINT64_MAX && g_errno == G_EINPROGRESS));
+        SOCKET got = accept(lis, NULL, NULL);
+        assert(got != INVALID_SOCKET);
+        closesocket(got); call2(ov_sock_close, cfd, 0);
+        // no port, no address, no sockaddr: refused, never the MKWMP lobby instead
+        uint8_t none[3][16] = {{16, 2, 0, 0, 127, 0, 0, 1}, {16, 2, 0x1f, 0x90, 0, 0, 0, 0}, {16, 10, 0x1f, 0x90, 127, 0, 0, 1}};
+        for (int i = 0; i < 4; i++) {
+            ov_sock_socket(&k); cfd = (int)k.x[0];
+            k.x[0] = cfd; k.x[1] = i < 3 ? (uintptr_t)none[i] : 0; k.x[2] = 16;
+            g_errno = 0;
+            ov_sock_connect(&k);
+            assert(k.x[0] == UINT64_MAX && g_errno == G_EINVAL);
+            call2(ov_sock_close, cfd, 0);
+        }
+        // Name resolution on Nextendo. An address the game session gives (gamesync) is itself, with the port asked
+        // for; 443 stays 443. The console maker's names need the session's serverHost: without a session they fail
+        // (never the MKWMP lobby, never the real owner of the name).
+        static const struct { const char *service; unsigned port; } kPorts[] = {{"8906", 8906}, {"443", 443}, {NULL, 0}, {"https", 443}};
+        for (size_t p = 0; p < sizeof kPorts / sizeof kPorts[0]; p++)
+            for (int typed = 0; typed < 2; typed++) {
+                Cpu q = {0};
+                GAddrInfo *r = NULL;
+                q.x[0] = (uintptr_t)"203.0.113.7"; q.x[1] = (uintptr_t)kPorts[p].service; q.x[3] = (uintptr_t)&r;
+                (typed ? ov_sock_getaddrinfo_cpp : ov_sock_getaddrinfo)(&q);
+                assert(q.x[0] == 0 && r);
+                const uint8_t *sa = typed ? (const uint8_t *)r->ai_canonname : r->ai_addr;
+                uint16_t port = htons((uint16_t)kPorts[p].port);
+                assert(sa[0] == 16 && sa[1] == 2 && !memcmp(sa + 2, &port, 2) && !memcmp(sa + 4, "\xcb\x00\x71\x07", 4));
+                if (!typed) call2(ov_sock_freeaddrinfo, (uintptr_t)r, 0);
+            }
+        static const char *const kNeedSession[] = {"t-e96531c6-lp1.lp1.t.npln.srv.nintendo.net", "nncs2-lp1.n.n.srv.nintendo.net",
+                                                   "nncs1-lp1.n.n.srv.nintendo.net"};
+        for (size_t i = 0; i < sizeof kNeedSession / sizeof kNeedSession[0]; i++) {
+            Cpu q = {0};
+            GAddrInfo *r = (GAddrInfo *)(uintptr_t)1;
+            q.x[0] = (uintptr_t)kNeedSession[i]; q.x[1] = (uintptr_t)"443"; q.x[3] = (uintptr_t)&r;
+            ov_sock_getaddrinfo(&q);
+            assert(q.x[0] == UINT64_MAX && !r);
+        }
+        // The game's HTTP client (ghost data, nnssl.h) on a socket connected as above: the two ends' addresses, errno
+        // through the socket library, plain send and recv (with MSG_PEEK, and the peer's end as 0), its resolver call.
+        {
+            Cpu h = {0}; ov_sock_socket(&h); int hfd = (int)h.x[0];
+            h.x[0] = hfd; h.x[1] = (uintptr_t)ask; h.x[2] = sizeof ask;
+            ov_sock_connect(&h);
+            SOCKET peer = accept(lis, NULL, NULL);
+            assert(peer != INVALID_SOCKET);
+            uint8_t name[16]; uint32_t nl = sizeof name;
+            Cpu a = {0}; a.x[0] = hfd; a.x[1] = (uintptr_t)name; a.x[2] = (uintptr_t)&nl;
+            ov_sock_peername(&a);
+            assert(a.x[0] == 0 && nl == 16 && name[0] == 16 && name[1] == 2 && !memcmp(name + 2, &la.sin_port, 2) &&
+                   !memcmp(name + 4, "\x7f\0\0\1", 4));
+            memset(name, 0, sizeof name);
+            a.x[0] = hfd; a.x[1] = (uintptr_t)name; a.x[2] = (uintptr_t)&nl;
+            ov_sock_sockname(&a);
+            assert(a.x[0] == 0 && nl == 16 && name[1] == 2 && (name[2] | name[3]) && !memcmp(name + 4, "\x7f\0\0\1", 4));
+            nl = 8;   // no room for an address
+            a.x[0] = hfd; a.x[1] = (uintptr_t)name; a.x[2] = (uintptr_t)&nl;
+            ov_sock_peername(&a);
+            assert(a.x[0] == UINT64_MAX && g_errno == G_EINVAL);
+            char in[8];
+            Cpu r = {0}; r.x[0] = hfd; r.x[1] = (uintptr_t)in; r.x[2] = sizeof in;
+            ov_sock_recv(&r);   // nothing yet
+            assert(r.x[0] == UINT64_MAX && call2(ov_sock_get_errno, 0, 0) == G_EAGAIN);
+            call2(ov_sock_set_errno, 0, 0);
+            assert(call2(ov_sock_get_errno, 0, 0) == 0 && g_errno == 0);
+            Cpu s = {0}; s.x[0] = hfd; s.x[1] = (uintptr_t)"ghost"; s.x[2] = 5;
+            ov_sock_send(&s);
+            assert(s.x[0] == 5 && recv(peer, in, sizeof in, 0) == 5 && !memcmp(in, "ghost", 5));
+            assert(send(peer, "data", 4, 0) == 4 && readable(hfd));
+            memset(in, 0, sizeof in);
+            r.x[0] = hfd; r.x[1] = (uintptr_t)in; r.x[2] = sizeof in; r.x[3] = 2;   // MSG_PEEK
+            ov_sock_recv(&r);
+            assert(r.x[0] == 4 && !memcmp(in, "data", 4));
+            r.x[0] = hfd; r.x[1] = (uintptr_t)in; r.x[2] = 2; r.x[3] = 0;
+            ov_sock_recv(&r);
+            assert(r.x[0] == 2);
+            r.x[0] = hfd; r.x[1] = (uintptr_t)in; r.x[2] = sizeof in; r.x[3] = 0;
+            ov_sock_recv(&r);
+            assert(r.x[0] == 2 && !memcmp(in, "ta", 2));
+            closesocket(peer);
+            assert(readable(hfd));
+            r.x[0] = hfd; r.x[1] = (uintptr_t)in; r.x[2] = sizeof in; r.x[3] = 0;
+            ov_sock_recv(&r);
+            assert(r.x[0] == 0);   // the server closed: the end
+            call2(ov_sock_close, hfd, 0);
+            r.x[0] = hfd; r.x[1] = (uintptr_t)in; r.x[2] = sizeof in;
+            ov_sock_recv(&r);      // not a descriptor of ours any more
+            assert(r.x[0] == UINT64_MAX && g_errno == G_EINVAL);
+            s.x[0] = hfd; s.x[1] = (uintptr_t)"x"; s.x[2] = 1;
+            ov_sock_send(&s);
+            assert(s.x[0] == UINT64_MAX && g_errno == G_EINVAL);
+            Cpu q = {0};
+            GAddrInfo *res = NULL;
+            q.x[0] = (uintptr_t)"203.0.113.7"; q.x[1] = (uintptr_t)"443"; q.x[3] = (uintptr_t)&res;
+            ov_sock_getaddrinfo_options(&q);
+            const uint8_t *sa = res ? res->ai_addr : NULL;
+            assert(q.x[0] == 0 && sa && res->ai_family == 2 && res->ai_addrlen == 16 && !res->ai_next &&
+                   !memcmp(sa, "\x10\x02\x01\xbb\xcb\x00\x71\x07", 8));
+            call2(ov_sock_freeaddrinfo, (uintptr_t)res, 0);
+            uint8_t option[32];
+            memset(option, 0xff, sizeof option);
+            assert(call2(ov_resolver_get_option, (uintptr_t)option, 0x2711) == 0 && !memcmp(option + 16, "\0\0\0\0", 4));
+            assert(call2(ov_resolver_set_option, (uintptr_t)option, 0) == 0);
+            assert(npln_guest_socket(hfd) == PLAT_NO_SOCK);
+        }
+        // Pia on Nextendo: a NAT probe (16 bytes, type 0) goes to the address Pia names, not to an MKWMP responder.
+        Cpu u1 = {0}, u2 = {0};
+        u1.x[0] = u2.x[0] = 2; u1.x[1] = u2.x[1] = 2;
+        ov_pia_socket(&u1); ov_pia_socket(&u2);
+        int tx = (int)u1.x[0], rx_fd = (int)u2.x[0];
+        ov_pia_bind(&u1); ov_pia_bind(&u2);
+        struct sockaddr_in ua; int ul = sizeof ua;
+        assert(!getsockname(fd_get(rx_fd), (struct sockaddr *)&ua, &ul));
+        uint8_t nat[16] = {16, 2, 0, 0, 127, 0, 0, 1};
+        memcpy(nat + 2, &ua.sin_port, 2);
+        static const char probe[16] = {0};
+        Cpu d = {0};
+        d.x[0] = tx; d.x[1] = (uintptr_t)probe; d.x[2] = sizeof probe; d.x[4] = (uintptr_t)nat; d.x[5] = sizeof nat;
+        ov_pia_sendto(&d);
+        assert(d.x[0] == 16 && readable(rx_fd));
+        nat[2] = nat[3] = 0;   // no port: rejected
+        d.x[0] = tx; d.x[1] = (uintptr_t)probe; d.x[2] = sizeof probe; d.x[4] = (uintptr_t)nat; d.x[5] = sizeof nat;
+        ov_pia_sendto(&d);
+        assert(d.x[0] == UINT64_MAX && g_errno == G_EINVAL);
+        call2(ov_sock_close, tx, 0); call2(ov_sock_close, rx_fd, 0);
+        // The account before any session: no token (nothing is asked of a launcher while dormant), a stand-in id.
+        char tok[64] = "untouched"; uint64_t tok_len = 99;
+        Cpu t = {0}; t.x[0] = (uintptr_t)&tok_len; t.x[1] = (uintptr_t)tok; t.x[2] = sizeof tok;
+        ov_nsa_load_token(&t);
+        assert(t.x[0] == 0 && tok_len == 0 && !strcmp(tok, "untouched"));
+        uint64_t account = 0;
+        Cpu n = {0}; n.x[0] = (uintptr_t)&account;
+        ov_nsa_get_id(&n);
+        assert(n.x[0] == 0 && account == FAKE_NSA_ID);
+        g_nextendo = 0;
+        g_server.sin_port = lobby_port;
+        closesocket(lis);
+        for (int i = 0; i < NFD; i++) assert(!g_used[i]);
+    }
     uint8_t cert_buffer[2048]; GCertificateInfo *info = NULL;
     Cpu cert = {0}; cert.x[0] = (uintptr_t)&info; cert.x[1] = (uintptr_t)cert_buffer;
     cert.x[2] = sizeof cert_buffer;
@@ -369,6 +558,29 @@ int main(void) {
     assert(sr.state == SEAT_UNAVAILABLE);
     seat_parse(0, NULL, &sr);
     assert(sr.state == SEAT_UNAVAILABLE);
+
+    // The seated reply's "room" (launcher 1.4.0), as the launcher writes it, into the crash record's breadcrumbs.
+    const char *seated_room = "{\"state\":\"seated\",\"ticket\":\"mkw1.p.s\",\"lobby\":\"216.128.169.210:8905\",\"name\":\"Ana\","
+                              "\"room\":{\"lobby\":\"0b4e7a10-1111-4222-8333-444455556666\",\"ussid\":12,\"ussids\":[3,12,16],"
+                              "\"at\":1763647200123}}";
+    seat_parse(200, seated_room, &sr);   // the top-level lobby, not the room's
+    assert(sr.state == SEAT_SEATED && !strcmp(sr.lobby, "216.128.169.210:8905"));
+    seat_set_room_sink(crumb_room);
+    seat_parse_room(seated_room);
+    CrumbRoom cr;
+    assert(crumb_room_get(&cr) && !strcmp(cr.lobby, "0b4e7a10-1111-4222-8333-444455556666") && cr.ussid == 12);
+    assert(cr.n == 3 && cr.ussids[0] == 3 && cr.ussids[2] == 16 && cr.at == 1763647200123ull);
+    assert(!crumb_room_host(&cr));   // the host is ussids[0], 3
+    seat_parse_room("{\"state\":\"seated\",\"room\":{\"lobby\":\"0b4e7a10-1111-4222-8333-444455556666\",\"ussid\":3,"
+                    "\"ussids\":[3,12,16],\"at\":1763647260000}}");
+    assert(crumb_room_get(&cr) && cr.ussid == 3 && crumb_room_host(&cr) && cr.at == 1763647260000ull);
+    seat_parse_room("{\"state\":\"seated\",\"ticket\":\"t\"}");   // no key (an older launcher): nothing changes
+    assert(crumb_room_get(&cr) && cr.ussid == 3);
+    seat_parse_room("{\"state\":\"seated\",\"room\":{\"lobby\":\"aa\",\"ussid\":5,\"ussids\":[5]}}");   // without "at"
+    assert(crumb_room_get(&cr) && cr.ussid == 5 && cr.at == 0 && crumb_room_host(&cr));
+    seat_parse_room("{\"state\":\"seated\",\"room\":null}");   // in no room
+    assert(!crumb_room_get(&cr));
+    seat_set_room_sink(NULL);
 
     // Notification queue: FIFO, drain, and oldest-dropped-on-overflow.
     Notification nbuf[32];

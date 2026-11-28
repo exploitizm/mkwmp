@@ -12,8 +12,7 @@ What it prints, for OLD and NEW side by side:
    4. PE exports (mkwgame.dll imports rt_dispatch from mkw.exe: npln.c install_profile_dispatch_trace)
    5. the .ovr table (what npln.c stock_handler reads): names added/removed, and for each npln.c kRegs name
       whether it has a stock handler (that decides which probe overrides are gated)
-   6. the detoured functions' first bytes against keypad_sigs.h: each function has a k*Prologues table of accepted
-      prologues (a k*Sig array and its *_STEAL count per mkw-recomp release that changed it); one must match
+   6. (removed: the keypad's detours; the probe draws nothing into the game any more)
    7. rt_dispatch's first bytes (mov rax,[rcx+0x138]: Cpu.thread at 312, recomp.h)
    8. the span of g_host (distance to the next symbol of the section) and the layout of hostfn.c's added[]: the
       fixed array of RUNTIME_OVERRIDE_MAX entries (up to 0.1.13) or the pointer grown with realloc (from 0.1.15)
@@ -22,6 +21,11 @@ What it prints, for OLD and NEW side by side:
   10. RT_GAME_ID (the 16-hex id of the game code mkw.exe accepts; a change means mkwgame.dll must be rebuilt
       before `mkw.exe --play` works) and, with --game-dir, the folder's mkwgame.id / mkwgame.dll imports
   11. the MKW_* keys MKWMP sets, as strings of mkw.exe (cfg.c known[])
+  12. the native plugin API (runtime/plugin/plugin.c api_template: its size and version) against the mod's
+      mkw_plugin.h (the MKWMP mod is the probe built as a plugin, backend_plugin.c): which of the versions the mod
+      uses the runtime has (2 the mod's settings, 3 native images for the camera, 4 the overlay's pad filter,
+      menu_open and frame capture). Upstream may be behind the mod (those parts stay off); MKWMP's own release
+      line (a version ending in -mkwmp) should carry the mod's version (a WARN when it does not)
 
 Usage (from the repo root; -I keeps Python from importing anything next to the inputs):
 
@@ -331,32 +335,7 @@ class Probe:
         if not self.names:
             raise ValueError("could not parse kNames from coff.c")
 
-        # keypad.c detours three functions; keypad_sigs.h lists, per function, every accepted prologue (one per
-        # mkw-recomp release that changed it) as {k*Sig, sizeof k*Sig, *_STEAL} rows of a k*Prologues table
-        keypad = strip_comments(rd("keypad.c"))
-        sigs_h = strip_comments(rd("keypad_sigs.h")) if (src / "keypad_sigs.h").is_file() else keypad
-        self.sigs = {}  # sig array name -> bytes
-        for m in re.finditer(r"static const uint8_t (k\w+Sig\w*)\[\]\s*=\s*\{([^}]*)\}", sigs_h):
-            self.sigs[m.group(1)] = bytes(int(x, 16) for x in re.findall(r"0x([0-9A-Fa-f]{2})", m.group(2)))
-        steal = dict(re.findall(r"\b(\w+_STEAL)\s*=\s*(\d+)", sigs_h))
-        tables = {}  # table name -> [(sig name, sig bytes, steal)]
-        for m in re.finditer(r"static const DetourPrologue (k\w+Prologues)\[\]\s*=\s*\{(.*?)\};", sigs_h, flags=re.S):
-            rows = re.findall(r"\{\s*(k\w+)\s*,\s*sizeof\s*\(?\s*(k\w+)\s*\)?\s*,\s*(\w+_STEAL)\s*\}", m.group(2))
-            tables[m.group(1)] = [(a, self.sigs[a], int(steal[st])) for a, b, st in rows
-                                  if a == b and a in self.sigs and st in steal]
-            if len(tables[m.group(1)]) != len(rows) or not rows:
-                raise ValueError(f"could not parse {m.group(1)} in keypad_sigs.h")
-        var_sym = dict(re.findall(r'void \*(\w+)\s*=\s*coff_symbol\("([^"]+)"\)', keypad))
-        # const DetourPrologue *pe = detour_match(entry, kEntryPrologues, ...);  ->  pe: (entry, kEntryPrologues)
-        var_table = {pv: (fv, tb) for pv, fv, tb in
-                     re.findall(r"\*(\w+)\s*=\s*detour_match\(\s*(\w+)\s*,\s*(k\w+Prologues)", keypad)}
-        self.detours = []  # (symbol, [(sig name, sig bytes, steal)]): any one prologue of the list may match
-        for m in re.finditer(r"\binstall\(\s*(\w+)\s*,\s*(\w+)\s*,", keypad):
-            fn_var, p_var = m.groups()
-            if p_var in var_table and var_table[p_var][0] == fn_var and fn_var in var_sym:
-                self.detours.append((var_sym[fn_var], tables.get(var_table[p_var][1], [])))
-        if not self.detours or any(not rows for _s, rows in self.detours):
-            raise ValueError("could not parse the detours from keypad.c / keypad_sigs.h")
+        # (the keypad's detours, once step 6, are gone: the probe detours no mkw.exe function any more)
 
         npln = strip_comments(rd("npln.c"))
         self.regs = re.findall(r'\{\s*"([^"]+)"\s*,', c_block(npln, r"kRegs\s*\[\s*\]\s*="))
@@ -387,6 +366,22 @@ class Probe:
                 self.mkw_keys.update(re.findall(r"\b(MKW_[A-Z0-9_]{3,})\b", extra.read_text("utf-8", "replace")))
         self.sdl_names = {n for n in self.sdl_names if not n.isupper()}  # hints (SDL_HINT_...) are not exports
         self.mkw_keys -= {"MKW_LAUNCHED", "MKW_NO_LAUNCHER"}  # read with getenv in main.c, not cfg.c keys
+
+        # the plugin build of the probe (backend_plugin.c, overlay.c): the API header it was written against. Every
+        # member of MkwPluginApi after size and version is a pointer, so its size is 8 + 8 * members
+        self.plugin_version, self.plugin_members, self.plugin_v4_used = 0, 0, []
+        if (src / "mkw_plugin.h").is_file():
+            hdr = strip_comments(rd("mkw_plugin.h"))
+            m = re.search(r"#define\s+MKW_PLUGIN_API_VERSION\s+(\d+)", hdr)
+            self.plugin_version = int(m.group(1)) if m else 0
+            m = re.search(r"typedef struct MkwPluginApi \{(.*?)\}\s*MkwPluginApi\s*;", hdr, flags=re.S)
+            fields = [f for f in (m.group(1).split(";") if m else []) if f.strip()]
+            if len(fields) > 2 and all("uint32_t" in f and "(" not in f for f in fields[:2]) \
+                    and all("*" in f for f in fields[2:]):
+                self.plugin_members = len(fields) - 2
+            uses = "".join(strip_comments(f.read_text("utf-8", "replace")) for f in sorted(src.glob("*.c")))
+            self.plugin_v4_used = [n for n in ("input_filter", "menu_open", "frame_capture")
+                                   if re.search(rf"\bapi->{n}\b", uses)]
 
         rs = repo / "rust/client/src/recomp.rs"
         self.known, self.supported = {}, []
@@ -521,9 +516,11 @@ def main() -> int:
         warn("old and new are the same file")
     v = probe.known.get(new.sha)
     if not v:
-        warn("the launcher does not know NEW's hash: add it to KNOWN (and SUPPORTED) in rust/client/src/recomp.rs")
+        warn("the launcher does not know NEW's hash: add it to KNOWN (and SUPPORTED) in rust/client/src/recomp.rs"
+             " and to Known (and Supported) in launcher/src/Mkwmp.Core/Targets/MkwRecomp/Recomp.cs, the list the WPF launcher uses")
     elif v not in probe.supported:
-        warn(f"the launcher knows NEW as {v} but refuses it: SUPPORTED in rust/client/src/recomp.rs")
+        warn(f"the launcher knows NEW as {v} but refuses it: SUPPORTED in rust/client/src/recomp.rs"
+             " and Supported in launcher/src/Mkwmp.Core/Targets/MkwRecomp/Recomp.cs")
     else:
         ok(f"the launcher accepts NEW ({v})")
 
@@ -652,51 +649,6 @@ def main() -> int:
         (args.ovr_dump / "ovr-old.txt").write_text("\n".join(on_) + "\n")
         (args.ovr_dump / "ovr-new.txt").write_text("\n".join(nn_) + "\n")
         out(f"  names written to {args.ovr_dump}")
-
-    # 6 ---------------------------------------------------------------------------------------------------------
-    out("\n[6] detours (keypad.c, signatures of keypad_sigs.h)")
-    for sym, rows in probe.detours:
-        accepted = ", ".join(f"{nm}({len(sg)}, steal {st})" for nm, sg, st in rows)
-        for tag, pe in (("old", o), ("new", n)):
-            f = pe.find(sym)
-            if len(f) != 1:
-                (fail if tag == "new" else note)(f"{sym}: {len(f)} symbols in {tag.upper()}")
-                continue
-            code = pe.read(f[0][1], 32)
-            # as detour_match: the first accepted prologue the function starts with
-            hit = next(((nm, sg, st) for nm, sg, st in rows if code[: len(sg)] == sg), None)
-            shown = len(hit[1]) if hit else max(len(sg) for _n, sg, _s in rows)
-            out(f"  {tag}  {sym} @ {f[0][1]:#x}: {hexs(code[:shown])}  "
-                + (f"{hit[0]}({len(hit[1])}, steal {hit[2]}) match" if hit else f"MISMATCH (accepted: {accepted})"))
-            if not hit:
-                if tag == "new":
-                    fail(f"{sym}: first bytes match none of {accepted}: keypad.c will not install its hooks")
-                else:
-                    note(f"{sym}: OLD matches none of the accepted prologues either")
-                continue
-            # the stolen bytes of the matching prologue, in this very build
-            signame, sig, steal = hit
-            ins = disasm(cs, code, f[0][1], 8)
-            if ins:
-                if tag == "new":
-                    out("       " + "; ".join(t for _s, t, _d in ins[:6]))
-                total, bad = 0, False
-                for size, text, dep in ins:
-                    if total >= steal:
-                        break
-                    if dep:
-                        bad = True
-                        fail(f"{sym} ({tag.upper()}): the stolen instruction '{text}' is position-dependent")
-                    total += size
-                if total != steal:
-                    fail(f"{sym} ({tag.upper()}): {steal} stolen bytes of {signame} do not end on an instruction "
-                         f"boundary ({total})")
-                elif not bad and tag == "new":
-                    ok(f"{sym}: {signame}, {steal} stolen bytes are whole position-independent instructions")
-    for nm in probe.names:
-        if "ImGui" in nm or "ImDrawList" in nm:
-            if len(n.find(nm)) != 1:
-                fail(f"{nm}: needed by the keypad's drawing, not exactly one symbol in NEW")
 
     # 7 ---------------------------------------------------------------------------------------------------------
     out("\n[7] rt_dispatch prologue (Cpu.thread offset)")
@@ -867,6 +819,61 @@ def main() -> int:
             warn(f"{key}: the string {bare!r} was in OLD and is not in NEW (key renamed or dropped?)")
         else:
             note(f"{key}: {bare!r} is in neither exe as a whole string (read some other way)")
+
+    # 12 --------------------------------------------------------------------------------------------------------
+    out("\n[12] native plugin API (plugin.c api_template) against the mod's mkw_plugin.h")
+
+    def plugin_api(pe: PE):
+        """(size, version) of the table every plugin gets, None when the exe has none or several."""
+        f = pe.find("api_template")
+        d = pe.read(f[0][1], 8) if len(f) == 1 else b""
+        return struct.unpack("<II", d) if len(d) == 8 else None
+
+    v4_runtime = ("plugins_input_filter", "plugins_frame_wanted", "plugins_frame_captured")  # input.c, gfx_present.c
+    ao, an = plugin_api(o), plugin_api(n)
+    want_size = 8 + 8 * probe.plugin_members if probe.plugin_members else 0
+    for tag, a in (("old", ao), ("new", an)):
+        out(f"  {tag}  " + (f"version {a[1]}, {a[0]} bytes ({(a[0] - 8) // 8} members)" if a else "no api_template"))
+    out(f"  mod  mkw_plugin.h version {probe.plugin_version}" + (f", {want_size} bytes" if want_size else "")
+        + (f"; version 4 members used: {' '.join(probe.plugin_v4_used)}" if probe.plugin_v4_used else ""))
+    own_line = any(v.endswith("-mkwmp") for v in port_versions(n))  # MKWMP's release line of mkw-recomp
+    if not probe.plugin_version:
+        note("the probe has no mkw_plugin.h (no plugin build): nothing to compare")
+    elif an is None:
+        if n.find("plugins_load"):
+            warn("NEW has plugins_load but no single api_template symbol: read runtime/plugin/plugin.c")
+        else:
+            note("NEW has no plugin loader: the mod cannot load there, winmm.dll is in charge")
+    else:
+        size, version = an
+        if ao and (version < ao[1] or size < ao[0]):
+            fail(f"the plugin API went back: version {ao[1]} ({ao[0]} bytes) -> {version} ({size} bytes)")
+        if (size - 8) % 8:
+            fail(f"api_template is {size} bytes: not two uint32_t and pointers, the mod's offsets do not hold")
+        if version >= probe.plugin_version:
+            if want_size and size < want_size:
+                fail(f"NEW says version {version} but its table is {size} bytes; the mod's version "
+                     f"{probe.plugin_version} table is {want_size}")
+            else:
+                ok(f"NEW has the mod's plugin API (version {version} >= {probe.plugin_version})")
+        else:
+            off = [what for v, what in ((2, "the mod's settings, on_exit"),
+                                        (3, "native images (the GameChat camera)"),
+                                        (4, "the overlay (pad filter, menu_open, frame capture)"))
+                   if version < v <= probe.plugin_version]
+            msg = f"NEW has plugin API {version}, the mod is written for {probe.plugin_version}: off there: {'; '.join(off)}"
+            if own_line:
+                warn(msg + " (MKWMP's own release line should carry the mod's version)")
+            else:
+                note(msg + " (the mod checks api->size and goes on without them)")
+        if version >= 4:
+            missing = [nm for nm in v4_runtime if len(n.find(nm)) != 1]
+            if missing:
+                fail(f"plugin API {version} without exactly one symbol each of {missing} (input.c / gfx_present.c call them)")
+            else:
+                ok("version 4's runtime side is linked in: " + " ".join(v4_runtime))
+        elif any(n.find(nm) for nm in v4_runtime):
+            warn(f"NEW has version 4's functions but says version {version}")
 
     # ----------------------------------------------------------------------------------------------------------
     out("\nSummary")

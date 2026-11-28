@@ -1,12 +1,18 @@
 # MKWMP on mkw-recomp's PS5 title: the plugin linked in, since the console loads no libraries.
 #   tools/ps5/build_game.py --plugin <this folder>   (mkw-recomp's PS5 build; tools/build/plugin_glue.py there)
-# The same sources as the Linux .so (build_plugin.py), with the PS5's platform files in place of plat_posix.c and
-# plat_http_posix.c (no /proc, no libcurl, no libraries), and the console's resolver (plat_net_ps5.c).
+# The same sources as the Linux .so (build_plugin.py: core() + POSIX + POSIX_HTTP + PLUGIN_ONLY + INGAME_C + the
+# in-game C++ and Dear ImGui + BACKEND), with the PS5's platform files in place of plat_posix.c, plat_http_posix.c and
+# plat_tls_posix.c (no /proc, no libcurl, no OpenSSL, no libraries), and the console's resolver (plat_net_ps5.c).
 name=mkwmp
+# build_plugin.py's CXX for the in-game overlay and its Dear ImGui; EMBED for fonts.c's #embed
+cxxflags=-std=c++20 -fno-exceptions -fno-rtti '-DIMGUI_USER_CONFIG="imconfig_mkwmp.h"' -I../src/ingame -I../third_party/imgui
+cflags=-Wno-c23-extensions
 
 # core (build.py's SOURCES without the Windows-only files)
 ../src/probe.c
 ../src/log.c
+../src/crash.c
+../src/breadcrumbs.c
 ../src/config.c
 ../src/notify.c
 ../src/launcher.c
@@ -14,10 +20,14 @@ name=mkwmp
 ../src/uuid5.c
 ../src/friends.c
 ../src/lobby_ca.c
+../src/nextendo.c
 ../src/voice.c
-../src/voice_ui.c
 ../src/guesthook.c
 ../src/gameaddrs.c
+../src/kartrace.c
+../src/nxfriends.c
+../src/roster.c
+../src/rosterhook.c
 ../src/npln.c
 
 # platform
@@ -25,16 +35,32 @@ name=mkwmp
 ../src/plat_net_posix.c
 ../src/plat_net_ps5.c
 ../src/plat_http_ps5.c
+../src/plat_tls_ps5.c
 
-# the plugin's own parts (build_plugin.py's PLUGIN_ONLY) and its backend
+# the plugin's own parts (build_plugin.py's PLUGIN_ONLY)
 ../src/seatapi.c
 ../src/seatd.c
-../src/modpage.c
-../src/voicetab.c
 ../src/camera.c
 ../src/camcodec.c
 ../src/camlib.c
-../src/cameratab.c
 ../src/chatroom.c
 ../src/roomnet.c
+../src/overlay.c
+../src/nnssl.c
+../src/ghost.c
+../src/winepad.c
+
+# the in-game overlay (INGAME_C, INGAME_CPP) and the mod's own Dear ImGui (IMGUI_CPP)
+../src/ingame/fonts.c
+../src/ingame/core.cpp
+../src/ingame/kit.cpp
+../src/ingame/page.cpp
+../src/ingame/toasts_exact.cpp
+../src/ingame/toasts_basic.cpp
+../third_party/imgui/imgui.cpp
+../third_party/imgui/imgui_draw.cpp
+../third_party/imgui/imgui_tables.cpp
+../third_party/imgui/imgui_widgets.cpp
+
+# the backend
 ../src/backend_plugin.c

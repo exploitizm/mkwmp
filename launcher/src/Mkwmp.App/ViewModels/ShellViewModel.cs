@@ -1,0 +1,786 @@
+// Copyright (C) 2026 Alexandre Moraes and contributors. GPL-3.0-or-later; see LICENSE.
+using System.Collections.ObjectModel;
+using System.Globalization;
+using System.Windows.Threading;
+using Mkwmp.App.Controls;
+using Mkwmp.App.Input;
+using Mkwmp.Core;
+
+namespace Mkwmp.App.ViewModels;
+
+/// <summary>A disc of the top bar: the player, then the friends who are on.</summary>
+/// <param name="Picture">On Nextendo: their profile picture (a file), when it is here.</param>
+/// <param name="Color">On Nextendo: the colour behind their picture, "#rrggbb"; "": the colour of the name.</param>
+public sealed record TopAvatar(string Name, AvatarPresence Presence, string Count, bool IsSelf, string? Picture = null, string Color = "");
+
+/// <summary>
+/// The window's state around <see cref="ILauncher"/>: it brings the launcher's changes and toasts
+/// to the UI thread, and owns what is not the launcher's: the page stack, the modal, the bottom
+/// sheet, the friends panel, the toasts, the hint bar, the theme. Pages reach all of it through
+/// <see cref="PageViewModel.Shell"/>.
+/// </summary>
+public sealed partial class ShellViewModel : ObservableObject, IDisposable
+{
+    private readonly Dispatcher _dispatcher;
+    private readonly DispatcherTimer _clock;
+    private readonly CancellationTokenSource _lifetime = new();
+    private int _changePending;
+    private ModalViewModel? _modal;
+    private LayerViewModel? _sheet;
+    private bool _isFriendsOpen;
+    private InputKind _inputKind = InputKind.Keyboard;
+    private bool _gamepadConnected;
+    private bool _isFullscreen;
+    private string _clockText = "";
+    private string _appliedTheme = "";
+    private IReadOnlyList<Hint> _hints = [];
+    private PageViewModel? _hintSource;
+    private IReadOnlyList<TopAvatar> _topAvatars = [];
+
+    public ShellViewModel(ILauncher launcher, Strings strings)
+    {
+        Launcher = launcher ?? throw new ArgumentNullException(nameof(launcher));
+        S = strings ?? throw new ArgumentNullException(nameof(strings));
+        UseLanguage(S); // the culture, the core's texts and the fonts, before any page makes a text
+        _dispatcher = Dispatcher.CurrentDispatcher;
+        _isFullscreen = launcher.Settings.Ui.Fullscreen;
+        Nav = new Navigator();
+        Nav.PropertyChanged += (_, e) =>
+        {
+            if (e.PropertyName == nameof(Navigator.Current))
+            {
+                OnPageChanged();
+            }
+        };
+        FriendsPanel = new FriendsPanelViewModel(this);
+        Routes.RegisterAll(this);
+
+        launcher.Changed += OnLauncherChanged;
+        launcher.Toasted += OnLauncherToasted;
+        ApplyTheme(launcher.Settings.Ui.Theme);
+
+        _clock = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(1) };
+        _clock.Tick += (_, _) => Tick();
+        _clock.Start();
+        Tick();
+        RefreshHints();
+    }
+
+    public ILauncher Launcher { get; }
+
+    public Strings S { get; }
+
+    public Navigator Nav { get; }
+
+    public FriendsPanelViewModel FriendsPanel { get; }
+
+    /// <summary>The launcher's state changed. Always on the UI thread, at most once per burst of changes.</summary>
+    public event EventHandler? StateChanged;
+
+    // ── the launcher's views, for bindings in the shell's own chrome ──
+
+    public ServerView Server => Launcher.Server;
+
+    public ProfileView Profile => Launcher.Profile;
+
+    public FriendsView Friends => Launcher.Friends;
+
+    public SessionView Session => Launcher.Session;
+
+    public UpdateView Update => Launcher.Update;
+
+    public LauncherSettings Settings => Launcher.Settings;
+
+    public bool IsServerOnline => Launcher.Server.State == ServerState.Online;
+
+    /// <summary>
+    /// The player, then up to five friends who are playing or online. Without a server (locked
+    /// online): only the player, from the local name, with no request count.
+    /// </summary>
+    public IReadOnlyList<TopAvatar> TopAvatars
+    {
+        get
+        {
+            var list = new List<TopAvatar>();
+            var profile = Launcher.Profile;
+            if (Launcher.NextendoFriends is { Enabled: true } nextendo)
+            {
+                // on Nextendo Network: the player as the account's username (the name other players see in races), then the
+                // Nextendo friends who are on
+                var self = Launcher.Nextendo.Username is { Length: > 0 } account ? account : Launcher.Settings.Name.Trim();
+                var asking = nextendo.Incoming.Count;
+                var own = Launcher.NextendoOwnAvatar;
+                list.Add(new TopAvatar(self, AvatarPresence.None, asking > 0 ? asking.ToString(CultureInfo.CurrentCulture) : "", true, own.Path, own.Color));
+                list.AddRange(nextendo.Ordered(StringComparer.CurrentCultureIgnoreCase)
+                    .Where(f => f.State != FriendState.Offline && f.Name.Length > 0)
+                    .Take(5)
+                    .Select(f => (Friend: f, Look: Launcher.NextendoAvatarOf(f.Pid)))
+                    .Select(f => new TopAvatar(f.Friend.Name, f.Friend.State == FriendState.Playing ? AvatarPresence.Playing : AvatarPresence.Online, "", false, f.Look.Path, f.Look.Color)));
+            }
+            else if (!OnlineEnabled)
+            {
+                if (Launcher.Settings.Name.Trim() is { Length: > 0 } local)
+                {
+                    list.Add(new TopAvatar(local, AvatarPresence.None, "", true));
+                }
+            }
+            else
+            {
+                if (profile.SignedIn)
+                {
+                    var requests = Launcher.Friends.Incoming.Count;
+                    list.Add(new TopAvatar(profile.Name, AvatarPresence.None, requests > 0 ? requests.ToString(CultureInfo.CurrentCulture) : "", true));
+                }
+                list.AddRange(Launcher.Friends.Friends
+                    .Where(f => f.State != FriendState.Offline)
+                    .OrderBy(f => f.State)
+                    .Take(5)
+                    .Select(f => new TopAvatar(f.Name, f.State == FriendState.Playing ? AvatarPresence.Playing : AvatarPresence.Online, "", false)));
+            }
+            if (!list.SequenceEqual(_topAvatars))
+            {
+                _topAvatars = list; // the same instance while nothing changed: the discs (and a focus on one) stay
+            }
+            return _topAvatars;
+        }
+    }
+
+    // ── about ──
+
+    public string AboutTitle => $"MKWMP Launcher {VersionAndChannel}";
+
+    /// <summary>"1.5.1-rc.2 · Alpha": the version that runs and the update channel it follows (Settings › Updates, About, What's New).</summary>
+    public string VersionAndChannel => $"{Launcher.Version} · {S[Launcher.Settings.UpdateChannel == UpdateChannel.Alpha ? "settings.updates.channel.alpha" : "settings.updates.channel.stable"]}";
+
+    public static string AboutLicense => "GPL-3.0-or-later";
+
+    /// <summary>Whose work the game's runtime is (mkw-recomp, MIT): the installed runtime's own credit, else the short line.</summary>
+    public string AboutRuntimeCredit => Launcher.Runtime.Credit?.Localized().Summary ?? S["setup.welcome.credit"];
+
+    /// <summary>The lines of the About box.</summary>
+    public string AboutText => $"{AboutTitle}\n{AboutLicense}";
+
+    // ── pages ──
+
+    public PageViewModel? Page => Nav.Current;
+
+    /// <summary>The window lost the focus or was hidden (MainWindow): the page stops its device tests.</summary>
+    public void WindowDeactivated() => Page?.OnWindowDeactivated();
+
+    public void WindowActivated() => Page?.OnWindowActivated();
+
+    public bool ShowTopBar => Page?.ShowTopBar ?? false;
+
+    public void Navigate(string route) => Nav.Navigate(route);
+
+    public void Navigate(PageViewModel page) => Nav.Navigate(page);
+
+    public bool GoBack() => Nav.GoBack();
+
+    /// <summary>Home as the only page (after the first-run setup, or from anywhere).</summary>
+    public void GoHome() => Nav.ResetTo(Routes.Home);
+
+    private void OnPageChanged()
+    {
+        if (_hintSource is not null)
+        {
+            _hintSource.PropertyChanged -= OnPagePropertyChanged;
+        }
+        _hintSource = Page;
+        if (_hintSource is not null)
+        {
+            _hintSource.PropertyChanged += OnPagePropertyChanged;
+        }
+        Raise(nameof(Page));
+        Raise(nameof(ShowTopBar));
+        RefreshHints();
+    }
+
+    private void OnPagePropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName is nameof(PageViewModel.Hints))
+        {
+            RefreshHints();
+        }
+        else if (e.PropertyName is nameof(PageViewModel.ShowTopBar))
+        {
+            Raise(nameof(ShowTopBar));
+        }
+    }
+
+    // ── modal ──
+
+    public ModalViewModel? Modal
+    {
+        get => _modal;
+        private set
+        {
+            var old = _modal;
+            if (Set(ref _modal, value))
+            {
+                old?.OnClosed();
+                value?.OnOpened();
+                Raise(nameof(IsModalOpen));
+                Raise(nameof(ShowGameWorkIndicator));
+                RefreshHints();
+            }
+        }
+    }
+
+    public bool IsModalOpen => _modal is not null;
+
+    /// <summary>Shows the modal (replacing one that is open).</summary>
+    public void ShowModal(ModalViewModel modal) => Modal = modal ?? throw new ArgumentNullException(nameof(modal));
+
+    /// <summary>Closes the modal; with an argument, only if that one is still the open one.</summary>
+    public void CloseModal(ModalViewModel? modal = null)
+    {
+        if (modal is null || ReferenceEquals(modal, _modal))
+        {
+            Modal = null;
+        }
+    }
+
+    /// <summary>B / Esc / a tap on the dimmed page.</summary>
+    public void DismissModal()
+    {
+        if (_modal is { CanDismiss: true } modal)
+        {
+            Modal = null;
+            modal.Dismiss();
+        }
+    }
+
+    /// <summary>Asks a yes / no question; true for <paramref name="yes"/>. Dismissing it is a no.</summary>
+    public Task<bool> ConfirmAsync(string title, string body, string? yes = null, string? no = null)
+    {
+        var answer = new TaskCompletionSource<bool>();
+        var modal = new ModalViewModel { Title = title, Body = body };
+        modal.Actions.Add(new ModalAction(yes ?? S["common.ok"], () =>
+        {
+            CloseModal(modal);
+            answer.TrySetResult(true);
+        }));
+        modal.Bottom = new ModalAction(no ?? S["common.cancel"], () =>
+        {
+            CloseModal(modal);
+            answer.TrySetResult(false);
+        });
+        modal.Dismissed += (_, _) => answer.TrySetResult(false);
+        ShowModal(modal);
+        return answer.Task;
+    }
+
+    /// <summary>Says something; completes when the player closes it.</summary>
+    public Task MessageAsync(string title, string body, string? close = null)
+    {
+        var done = new TaskCompletionSource();
+        var modal = new ModalViewModel { Title = title, Body = body };
+        modal.Bottom = new ModalAction(close ?? S["common.ok"], () =>
+        {
+            CloseModal(modal);
+            done.TrySetResult();
+        });
+        modal.Dismissed += (_, _) => done.TrySetResult();
+        ShowModal(modal);
+        return done.Task;
+    }
+
+    /// <summary>A modal that cannot be dismissed: a spinner, and a bar once you <see cref="ProgressModal.Report"/>. Close it yourself.</summary>
+    public ProgressModal ShowProgress(string title, string body = "")
+    {
+        var modal = new ProgressModal(this, title, body);
+        ShowModal(modal);
+        return modal;
+    }
+
+    /// <summary>The update card (what is new, download, restart).</summary>
+    public void ShowUpdateModal() => ShowModal(new UpdateModal(this));
+
+    // ── bottom sheet ──
+
+    /// <summary>The open bottom sheet's view model (its view: a DataTemplate in ViewMap.xaml).</summary>
+    public LayerViewModel? Sheet
+    {
+        get => _sheet;
+        private set
+        {
+            var old = _sheet;
+            if (Set(ref _sheet, value))
+            {
+                old?.OnClosed();
+                value?.OnOpened();
+                Raise(nameof(IsSheetOpen));
+                RefreshHints();
+            }
+        }
+    }
+
+    public bool IsSheetOpen => _sheet is not null;
+
+    public void OpenSheet(LayerViewModel sheet) => Sheet = sheet ?? throw new ArgumentNullException(nameof(sheet));
+
+    public void CloseSheet() => Sheet = null;
+
+    // ── friends panel ──
+
+    public bool IsFriendsOpen
+    {
+        get => _isFriendsOpen;
+        set
+        {
+            if (Set(ref _isFriendsOpen, value))
+            {
+                if (value)
+                {
+                    FriendsPanel.OnOpened();
+                }
+                else
+                {
+                    FriendsPanel.OnClosed();
+                }
+                Raise(nameof(IsSidePanelOpen));
+                RefreshHints();
+            }
+        }
+    }
+
+    /// <summary>A panel from the side is open (friends, the file picker, a page's drawer): it has its own hint bar, the page's shows no buttons.</summary>
+    public bool IsSidePanelOpen => _isFriendsOpen || IsPickerOpen || IsDrawerOpen;
+
+    public void ToggleFriends() => IsFriendsOpen = !IsFriendsOpen;
+
+    // ── toasts ──
+
+    public ObservableCollection<ToastViewModel> Toasts { get; } = [];
+
+    /// <summary>
+    /// Toasts are also shown over a running game (Overlay/InGameToasts: drawn by the game, or the small window over it):
+    /// news that comes while the launcher is behind a game goes there, not to the system's notifications.
+    /// </summary>
+    public bool ToastsOverGame { get; set; }
+
+    /// <summary>
+    /// Shows a toast for as long as its kind stays (at most four at a time; the oldest goes first): 5 s for news, 6 s
+    /// for a warning or an answer (<paramref name="always"/>), 8 s for an error.
+    /// </summary>
+    public void ShowToast(string title, string body = "", ToastKind kind = ToastKind.Info, bool always = false)
+    {
+        var toast = new ToastViewModel(title, body, kind, always) { LeavesAtMs = Launcher.ToastBridge.NowMs + (long)Toast.StayFor(kind, always).TotalMilliseconds };
+        Toasts.Add(toast);
+        while (Toasts.Count > 4)
+        {
+            Toasts.RemoveAt(0);
+        }
+        _ = RemoveLater(toast);
+    }
+
+    /// <summary>The game took a toast off its screen (POST /local/v1/toasts/{id}/action dismiss): it goes here too.</summary>
+    public void DismissToast(string id)
+    {
+        if (Toasts.FirstOrDefault(t => t.Id == id && !t.Leaving) is { } toast)
+        {
+            toast.Leaving = true;
+            toast.LeavesAtMs = Launcher.ToastBridge.NowMs;
+            _ = RemoveLater(toast, TimeSpan.Zero);
+        }
+    }
+
+    private async Task RemoveLater(ToastViewModel toast, TimeSpan? stay = null)
+    {
+        try
+        {
+            await Task.Delay(stay ?? toast.Stay, _lifetime.Token).ConfigureAwait(true);
+            if (stay is null && toast.Leaving)
+            {
+                return; // dismissed meanwhile: that removal runs
+            }
+            toast.Leaving = true;
+            await Task.Delay(260, _lifetime.Token).ConfigureAwait(true);
+            Toasts.Remove(toast);
+        }
+        catch (OperationCanceledException)
+        {
+            // the window is closing
+        }
+    }
+
+    // ── input and hints ──
+
+    /// <summary>What the player touched last (the window sets it).</summary>
+    public InputKind InputKind
+    {
+        get => _inputKind;
+        set => Set(ref _inputKind, value);
+    }
+
+    public bool GamepadConnected
+    {
+        get => _gamepadConnected;
+        set => Set(ref _gamepadConnected, value);
+    }
+
+    /// <summary>The connected controller's name when it is known ("Nintendo Switch Pro Controller"), else null.</summary>
+    public string? GamepadName
+    {
+        get => _gamepadName;
+        set => Set(ref _gamepadName, value);
+    }
+
+    private string? _gamepadName;
+
+    /// <summary>The hint bar now: the top layer's, else the page's.</summary>
+    public IReadOnlyList<Hint> Hints
+    {
+        get => _hints;
+        private set => Set(ref _hints, value);
+    }
+
+    /// <summary>The window's handler for a button press (so a tap on a hint does what the button does).</summary>
+    public Func<PadButton, bool>? ButtonSink { get; set; }
+
+    /// <summary>Presses a button as if on the controller.</summary>
+    public void Press(PadButton button)
+    {
+        if (ButtonSink is { } sink)
+        {
+            sink(button);
+        }
+        else
+        {
+            HandleButton(button);
+        }
+    }
+
+    public void RefreshHints()
+    {
+        if (_keyboard is { } keyboard)
+        {
+            Hints = keyboard.Hints ?? [];
+        }
+        else if (_picker is { } picker)
+        {
+            Hints = picker.Hints ?? [];
+        }
+        else if (_modal is { } modal)
+        {
+            Hints = modal.Hints ?? (modal.CanDismiss ? [new Hint(PadButton.B, S["hint.back"]), new Hint(PadButton.A, S["hint.ok"])] : [new Hint(PadButton.A, S["hint.ok"])]);
+        }
+        else if (_sheet is { } sheet)
+        {
+            Hints = sheet.Hints ?? [new Hint(PadButton.B, S["hint.close"]), new Hint(PadButton.A, S["hint.ok"])];
+        }
+        else if (_drawer is { } drawer)
+        {
+            Hints = drawer.Hints ?? [new Hint(PadButton.B, S["hint.back"]), new Hint(PadButton.A, S["hint.ok"])];
+        }
+        else if (_isFriendsOpen)
+        {
+            Hints = FriendsPanel.Hints ?? [new Hint(PadButton.B, S["hint.close"]), new Hint(PadButton.A, S["hint.ok"])];
+        }
+        else
+        {
+            Hints = Page?.Hints ?? DefaultHints();
+        }
+    }
+
+    /// <summary>
+    /// Friends, Back (when there is a page to go back to), OK. Friends are an MKWMP server's, or the linked Nextendo
+    /// account's: while Nextendo Network is where PLAY goes online and nobody is signed in, the hint bar does not
+    /// offer them (Y still opens the panel, which says so).
+    /// </summary>
+    public IReadOnlyList<Hint> DefaultHints()
+    {
+        var hints = new List<Hint>();
+        if (ShowFriendsHint)
+        {
+            hints.Add(new Hint(PadButton.Y, S["hint.friends"]));
+        }
+        if (Nav.CanGoBack)
+        {
+            hints.Add(new Hint(PadButton.B, S["hint.back"]));
+        }
+        hints.Add(new Hint(PadButton.A, S["hint.ok"]));
+        return hints;
+    }
+
+    /// <summary>
+    /// A button that is not a direction or A: the top layer gets it first, then the page, then the
+    /// shell's own meaning (B back, Y / RB friends, Start settings). True when something used it.
+    /// </summary>
+    public bool HandleButton(PadButton button)
+    {
+        if (HandleKeyboardButton(button))
+        {
+            return true; // the on-screen keyboard is above everything
+        }
+        if (_picker is { } picker)
+        {
+            return picker.OnButton(button); // the file picker, above a modal: it has every button
+        }
+        if (_modal is { } modal)
+        {
+            if (modal.OnButton(button))
+            {
+                return true;
+            }
+            if (button == PadButton.B)
+            {
+                DismissModal();
+            }
+            return true; // a modal swallows everything else
+        }
+        if (_sheet is { } sheet)
+        {
+            if (sheet.OnButton(button))
+            {
+                return true;
+            }
+            if (button == PadButton.B)
+            {
+                CloseSheet();
+            }
+            return true;
+        }
+        if (_drawer is { } drawer)
+        {
+            if (drawer.OnButton(button))
+            {
+                return true;
+            }
+            if (button == PadButton.B)
+            {
+                CloseDrawer();
+            }
+            return true; // the page under it waits
+        }
+        if (_isFriendsOpen)
+        {
+            if (FriendsPanel.OnButton(button))
+            {
+                return true;
+            }
+            if (button is PadButton.B or PadButton.Y or PadButton.RB)
+            {
+                IsFriendsOpen = false;
+            }
+            return true;
+        }
+        if (Page is { } page && button != PadButton.B && page.OnButton(button))
+        {
+            return true;
+        }
+        switch (button)
+        {
+            case PadButton.B:
+                return Page?.OnBack() == true || GoBack();
+            case PadButton.Y or PadButton.RB:
+                IsFriendsOpen = true;
+                return true;
+            case PadButton.Start:
+                if (Page is not SettingsViewModel)
+                {
+                    Navigate(Routes.Settings);
+                }
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    // ── theme, window ──
+
+    /// <summary>"light" or "dark" (<c>UiSettings.Theme</c>).</summary>
+    public string Theme => _appliedTheme;
+
+    public bool IsDark => _appliedTheme == "dark";
+
+    /// <summary>Switches the palette now and saves the choice.</summary>
+    public Task SetThemeAsync(string theme)
+    {
+        ApplyTheme(theme);
+        return UpdateSettingsAsync(s => s with { Ui = s.Ui with { Theme = _appliedTheme } });
+    }
+
+    /// <summary>Settings › Appearance › Contrast: one of <see cref="Themes.Palette.Steps"/> (<c>UiSettings.Contrast</c>).</summary>
+    public string Contrast => _appliedContrast;
+
+    private string _appliedContrast = Themes.Palette.Normal;
+
+    /// <summary>Switches the contrast now and saves the choice.</summary>
+    public Task SetContrastAsync(string contrast)
+    {
+        contrast = Themes.Palette.Normalize(contrast);
+        ApplyTheme(_appliedTheme, contrast);
+        return UpdateSettingsAsync(s => s with { Ui = s.Ui with { Contrast = contrast } });
+    }
+
+    private void ApplyTheme(string theme, string? contrast = null)
+    {
+        theme = theme == "dark" ? "dark" : "light";
+        contrast = Themes.Palette.Normalize(contrast ?? Launcher.Settings.Ui.Contrast);
+        if (_appliedTheme == theme && _appliedContrast == contrast)
+        {
+            return;
+        }
+        _appliedTheme = theme;
+        _appliedContrast = contrast;
+        ThemeManager.Apply(theme, contrast);
+        Raise(nameof(Theme));
+        Raise(nameof(IsDark));
+        Raise(nameof(Contrast));
+    }
+
+    /// <summary>Borderless full screen, or a normal window (F11). The window follows this.</summary>
+    public bool IsFullscreen
+    {
+        get => _isFullscreen;
+        private set => Set(ref _isFullscreen, value);
+    }
+
+    public Task SetFullscreenAsync(bool fullscreen)
+    {
+        IsFullscreen = fullscreen;
+        return UpdateSettingsAsync(s => s with { Ui = s.Ui with { Fullscreen = fullscreen } });
+    }
+
+    /// <summary>Saves a changed copy of the settings (no save when nothing changed).</summary>
+    public async Task UpdateSettingsAsync(Func<LauncherSettings, LauncherSettings> change)
+    {
+        ArgumentNullException.ThrowIfNull(change);
+        var before = Launcher.Settings;
+        var after = change(before);
+        if (!Equals(before, after))
+        {
+            await Launcher.SaveSettingsAsync(after).ConfigureAwait(true);
+        }
+    }
+
+    /// <summary>The window closes itself on this.</summary>
+    public event EventHandler? QuitRequested;
+
+    public void Quit()
+    {
+        IsQuitting = true;
+        QuitRequested?.Invoke(this, EventArgs.Empty);
+    }
+
+    // ── the launcher's events ──
+
+    private void OnLauncherChanged(object? sender, EventArgs e)
+    {
+        if (Interlocked.Exchange(ref _changePending, 1) == 0)
+        {
+            _dispatcher.BeginInvoke(DispatcherPriority.DataBind, RaiseState);
+        }
+    }
+
+    private void RaiseState()
+    {
+        Interlocked.Exchange(ref _changePending, 0);
+        ApplyTheme(Launcher.Settings.Ui.Theme);
+        ApplyLanguage(); // another language in the settings: switched here, with no restart
+        RaiseAll();
+        Page?.OnStateChanged();
+        FriendsPanel.OnStateChanged();
+        _sheet?.OnStateChanged();
+        _drawer?.OnStateChanged();
+        _modal?.OnStateChanged();
+        WatchUpdate(); // a download that finished behind another page (ShellViewModel.Update.cs)
+        WatchGameWork(); // the game's download or setup ended behind another page; its update after a launcher update (ShellViewModel.GameWork.cs)
+        OfferCrash(); // the game crashed and the player has not answered yet (ShellViewModel.Crash.cs)
+        StateChanged?.Invoke(this, EventArgs.Empty);
+    }
+
+    private void OnLauncherToasted(object? sender, Toast toast) =>
+        _dispatcher.BeginInvoke(() =>
+        {
+            if (!OnlineEnabled && !FriendsOnNextendo && toast.Kind is ToastKind.FriendOnline or ToastKind.FriendPlaying or ToastKind.FriendRequest)
+            {
+                return; // locked online: there are no friends to hear from, here or in the system's notifications
+            }
+            // behind a running game the toast is the game's to show (top right, in the race): not a system notification
+            var overGame = ToastsOverGame && GameRuns && !IsOverlay;
+            if (overGame || ToastSink?.Invoke(toast) != true)
+            {
+                ShowToast(toast.Title, toast.Body, toast.Kind, toast.Always);
+            }
+        });
+
+    private void Tick()
+    {
+        ClockText = DateTime.Now.ToString("t", S.Culture); // 15:07, or 3:07 PM where the language writes it so
+        if (DateTime.UtcNow >= _nextBatteryRead)
+        {
+            ReadBattery();
+        }
+    }
+
+    public string ClockText
+    {
+        get => _clockText;
+        private set => Set(ref _clockText, value);
+    }
+
+    public void Dispose()
+    {
+        _clock.Stop();
+        Launcher.Changed -= OnLauncherChanged;
+        Launcher.Toasted -= OnLauncherToasted;
+        _lifetime.Cancel();
+        _lifetime.Dispose();
+    }
+}
+
+/// <summary>Swaps the palette (Themes/Colors.Light.xaml or Colors.Dark.xaml): the first merged dictionary of the app.</summary>
+public static class ThemeManager
+{
+    public static string Current { get; private set; } = "light";
+
+    /// <summary>Settings › Appearance › Contrast (<see cref="Themes.Palette.Steps"/>).</summary>
+    public static string Contrast { get; private set; } = Themes.Palette.Normal;
+
+    public static void Apply(string theme, string? contrast = null)
+    {
+        Current = theme == "dark" ? "dark" : "light";
+        Contrast = Themes.Palette.Normalize(contrast ?? Contrast);
+        if (System.Windows.Application.Current is not { } app)
+        {
+            return;
+        }
+        var colors = new System.Windows.ResourceDictionary
+        {
+            Source = new Uri($"/mkwmp;component/Themes/Colors.{(Current == "dark" ? "Dark" : "Light")}.xaml", UriKind.Relative),
+        };
+        ApplyContrast(colors, Themes.Palette.Factor(Contrast));
+        var merged = app.Resources.MergedDictionaries;
+        if (merged.Count > 0)
+        {
+            merged[0] = colors;
+        }
+        else
+        {
+            merged.Add(colors);
+        }
+    }
+
+    /// <summary>The palette file's surface, line and text brushes replaced by the ones of that contrast (Themes/Palette.cs).</summary>
+    private static void ApplyContrast(System.Windows.ResourceDictionary colors, double factor)
+    {
+        var palette = new Dictionary<string, Themes.Rgba>(StringComparer.Ordinal);
+        foreach (var key in colors.Keys.OfType<string>())
+        {
+            if (colors[key] is System.Windows.Media.SolidColorBrush brush)
+            {
+                var c = brush.Color;
+                palette[key] = new Themes.Rgba(c.A, c.R, c.G, c.B);
+            }
+        }
+        foreach (var (key, c) in Themes.Palette.Derive(palette, factor))
+        {
+            var brush = new System.Windows.Media.SolidColorBrush(System.Windows.Media.Color.FromArgb(c.A, c.R, c.G, c.B));
+            brush.Freeze();
+            colors[key] = brush;
+        }
+    }
+}

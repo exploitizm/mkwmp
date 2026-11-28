@@ -1,4 +1,4 @@
-//! `mkwmp host`: a whole server in one command, for a PC or a VM.
+//! `server host`: a whole server in one command, for a PC or a VM.
 //!
 //! The first run creates everything in a data folder: the ticket signing
 //! key, the lobby's tokens, its TLS certificate (self-signed, for the host
@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 type Res<T> = Result<T, Box<dyn std::error::Error>>;
 
 pub const USAGE: &str = "\
-usage: mkwmp host [--public-ip IPV4] [--name NAME] [--capacity N] [--turn-port PORT]
+usage: server host [--public-ip IPV4] [--name NAME] [--capacity N] [--turn-port PORT]
                   [--seat-bind ADDR:PORT] [--data DIR] [--init-only]
 
   --public-ip   the IPv4 address players reach this machine at (asked on the
@@ -65,7 +65,7 @@ impl Host {
     fn save(&self, path: &Path) -> Res<()> {
         let ip = self.public_ip.map(|i| i.to_string()).unwrap_or_default();
         let text = format!(
-            "# mkwmp host settings (`mkwmp host --help`). server.toml is written from these on every start.\n\
+            "# mkwmp host settings (`server host --help`). server.toml is written from these on every start.\n\
              public_ip = \"{ip}\"\nname = \"{}\"\ncapacity = {}\nturn_port = {}\nseat_bind = \"{}\"\n",
             self.name, self.capacity, self.turn_port, self.seat_bind
         );
@@ -199,7 +199,7 @@ fn random_hex(n: usize) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
 }
 
-/// The host names the game connects to (it still asks for Nintendo's names;
+/// The host names the game connects to (it still asks for the official names;
 /// the patch redirects the connection). Same profile as the built-in
 /// certificate: RSA 2048, self-signed, its own CA.
 pub const LOBBY_CERT_NAMES: [&str; 3] = ["*.lp1.t.npln.srv.nintendo.net", "gamesync.npln.nintendo.net", "localhost"];
@@ -257,7 +257,7 @@ fn ensure_keys(data: &Path, server_name: &str) -> Res<String> {
 
 fn server_toml(h: &Host, ip: Ipv4Addr, public_key: &str) -> String {
     format!(
-        r#"## Written by `mkwmp host` on every start, from host.toml: edit that (or
+        r#"## Written by `server host` on every start, from host.toml: edit that (or
 ## pass flags), not this file. Paths are relative to this file.
 [server]
 name = "{name}"
@@ -291,6 +291,7 @@ require_ticket = true
 roster_url = "http://{roster}"
 roster_token_file = "keys/lobby-tokens.txt"
 token_secret_file = "keys/lobby-token-secret"
+ban_queue_file = "lobby-bans-pending.json"
 
 [tls]
 cert = "keys/lobby-cert.pem"

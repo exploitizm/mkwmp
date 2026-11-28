@@ -35,7 +35,7 @@ int game_build(void) {
     }
     if (build == GAME_UNKNOWN) build = GAME_OTHER;   // mapped but not a build we know: final
     plat_xchg(&cached, build);
-    mkwmp_log("game build: %s (main+4 = %#x)", game_build_name(build), mod0);
+    mkwmp_event("game build: %s (main+4 = %#x)", game_build_name(build), mod0);
     return build;
 }
 
@@ -48,7 +48,7 @@ int guesthook_init(void) {
     if (g_rt.host_fn_at || g_rt.override_address) return 1;
     if (!plat_xchg(&said, 1))
         mkwmp_log("guesthook: the runtime cannot route indirect calls to us now (no g_host, or the plugin API's "
-                  "address overrides are closed: the game is running); in-game voice UI off");
+                  "address overrides are closed: the game is running); vtable hooks off");
     return 0;
 }
 

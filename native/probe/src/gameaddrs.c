@@ -15,12 +15,6 @@ static const struct game_addrs kRows[] = {
         .grpc_timedwait_lr = M(0x104a8bc), .grpc_timedwait_bl = 0x945f879a,
         .errsvc_post = M(0x222d78c), .errsvc_vtable = M(0x325bc30), .errsvc_words = {0xd503237f, 0xa9bd7bfd},
         .err_referee_timeout = 0x606314c9,
-        .vt_online_pause = M(0x3248970), .fn_pause_open = M(0x21b22ec), .fn_pause_frame = M(0x21b384c),
-        .fn_plate_text = M(0x21deb68),     // FUN_021deb68(ctl, char16*): writes the plate's two name panes
-        .plate_text_words = {0xd503237f, 0xd10143ff, 0xa9017bfd, 0xf90013f7},
-        .slot_open = 7, .slot_frame = 11, .rows = 24,
-        .page_plates = 0x770, .plate_size = 0x150, .entry_name = 0x18, .entry_me = 0x78,
-        .page_count = 0x3d80, .page_entries = 0x3d88,
         .boot_signin = 1,
         // ---- diagnostic
         .pia_join_step = {
@@ -85,12 +79,6 @@ static const struct game_addrs kRows[] = {
         .err_referee_timeout = 0x606314c9,
         // The error-post row is proven live (T2, 2026-11-18: 0x884b839c, 0x660ac5da and 0x9b928162 posted with the
         // right ids).
-        .vt_online_pause = M(0x3622528), .fn_pause_open = M(0x24ca550), .fn_pause_frame = M(0x24cc010),
-        .fn_plate_text = M(0x2505f10),
-        .plate_text_words = {0xd503237f, 0xd10143ff, 0xa9017bfd, 0xf90013f7},
-        .slot_open = 7, .slot_frame = 11, .rows = 26,
-        .page_plates = 0x778, .plate_size = 0x170, .entry_name = 0x18, .entry_me = 0x78,
-        .page_count = 0x4628, .page_entries = 0x4630,
         .stock_lo = 0x7003800000ull, .stock_hi = 0x7003800000ull + 0xe0000,   // subsdk0 "movie"
         .boot_signin = 0,   // no boot sign-in in a whole offline session (mkwmp.log 2026-11-18, mkw-recomp 0.1.13)
         // The camera set-up (CAMERA-RE.md 9, static RE of 2026-11-19; not proven live yet). The node's update
@@ -105,6 +93,51 @@ static const struct game_addrs kRows[] = {
         .cam_query_words = {0xf9400008, 0xf9406d08, 0xd63f0100}, .cam_query_slot = 0xd8 / 8,
         .cam_ret0 = M(0x1c868a0), .cam_ret0_words = {0x2a1f03e0, 0xd65f03c0},
         .g_flags4 = 0x12c, .cam_setup_bit = 11,
+        // The friend manager (static reading of 2026-11-27; not proven live yet). Its update main+0x5faef0 is slot 11
+        // of the class table main+0x36364b8 and of both subclass tables. main+0x12f4c10 locks the friend client and
+        // copies its friend users (40-byte elements); main+0x2560de0 is the destructor the game calls on that copy.
+        .fr_vtables = {M(0x36364b8), M(0x35af9c8), M(0x3682f08)},
+        .fr_slot_changed = 9, .fr_slot_tick = 11, .fr_slot_reload = 15, .fr_slot_remap = 19,
+        .fr_changed = M(0x255f0e0), .fr_tick = M(0x5faef0), .fr_reload = M(0x5fb2e0), .fr_remap = M(0x255f8c0),
+        .fr_reinit = M(0xd6d7a0), .fr_users_copy = M(0x12f4c10), .fr_users_free = M(0x2560de0),
+        .fr_guard = {
+            {M(0x5faf08), 0x91412014}, {M(0x5faf10), 0x396ce688},     // update: the "console list read" byte
+            {M(0x5faf78), 0xb9408a68},                                 // ... and the state at +0x88
+            {M(0x5fafd8), 0xf9401660}, {M(0x5fafe4), 0xf9401108},     // ... the start operation at +0x28, its "finished?"
+            {M(0x255f0e0), 0x52916728}, {M(0x255f0e4), 0x72a00088}, {M(0x255f0e8), 0x38686808},   // "changed?"
+            {M(0xd6d7a0), 0x900152e8}, {M(0xd6d7a4), 0x91394108}, {M(0xd6d7a8), 0xf9400108},      // start over
+            {M(0x12f4c1c), 0xaa0003f3}, {M(0x12f4c20), 0x9101c000}, {M(0x12f4c24), 0xaa0803f4},   // copy: lock, x8
+            {M(0x12f4c34), 0xa9490a61}, {M(0x12f4c38), 0xb202e7e9},                               // ... 40-byte range
+            {M(0x2560df4), 0xf9400014}, {M(0x2560df8), 0xf9400295}, {M(0x2560e14), 0x385d8ec9},   // free
+            {M(0x255f8f8), 0xf9400400},                                // attach: the client at +8,
+            {M(0x255f958), 0x394f4288},                                // ... the "has a server user" byte at +0x3d0,
+            {M(0x255f99c), 0xf94012a8},                                // ... the account id at element +0x20
+        },
+        .fr_client = 8, .fr_op = 0x28, .fr_op_done = 0x20, .fr_state = 0x88, .fr_count = 0x98, .fr_items = 0xa0,
+        .fr_mapped = 0x3d0, .fr_user_size = 0x28, .fr_user_account = 0x20,
+        // The lobby roster (LOBBY-ROSTER-1.8.0.md §3, §4: static reading of 2026-11-27; not proven live yet). The
+        // controller's update main+0x6f6e70 is slot 38 of main+0x35afbd8 only and runs the context update
+        // main+0x6f6f80, which fills the member tree; main+0x21084a0 is the game's getter of the current context.
+        .ro_vtable = M(0x35afbd8), .ro_slot = 38, .ro_update = M(0x6f6e70),
+        .ro_ctrl_g = M(0x37c9830), .ro_mgr_g = M(0x37be190),
+        .ro_ctx = 0xa0, .ro_mgr = 0x80, .ro_cur = 0x12d0,
+        .rl = {.root = 0x30, .count = 0x48, .left = 0, .right = 8, .key = 0x18, .local = 0x20, .ussid = 0x28,
+               .uid = 0x50, .st = 0x874, .name = 0x878, .sid = 0x8c8, .lid = 0x8d0},
+        .ro_match = {M(0x240e570), M(0x2415e00)}, .ro_match_key = 0xb8,
+        .ro_match_slots = {{M(0x3608290), M(0x3608420), M(0x3608600), M(0x3608730), M(0x3608860), M(0x3608bb8)},
+                           {M(0x3608a10)}},
+        .ro_guard = {
+            {M(0x6f6e70), 0xd503237f}, {M(0x6f6e74), 0xa9bd7bfd}, {M(0x6f6e78), 0xf9000bf5}, {M(0x6f6e7c), 0xa9024ff4},
+            {M(0x6f6f80), 0xd503237f}, {M(0x6f6f84), 0xfc190fe8}, {M(0x6f6f88), 0xa9017bfd}, {M(0x6f6f8c), 0xa9026ffc},
+            {M(0x6f7dc4), 0x94327417},                                 // bl: the "uid" key getter
+            {M(0x6f7de0), 0xf9401afb},                                 // ldr x27, [x23, #0x30]: the uid buffer
+            {M(0x6f7f9c), 0xf9442efc},                                 // ldr x28, [x23, #0x858]: the name buffer
+            {M(0x6f7ad4), 0xf90456e0},                                 // str x0, [x23, #0x8a8]: p2p_sid
+            {M(0x21084c8), 0x91028108},                                // context getter: add x8, x8, #0xa0
+            {M(0x94cc50), 0xf9443ec8},                                 // player list: ldr x8, [x22, #0x878] (the name)
+            {M(0x240e570), 0xd503237f}, {M(0x240e574), 0xd10183ff}, {M(0x240e578), 0xa9017bfd}, {M(0x240e57c), 0xa90267fa},
+            {M(0x2415e00), 0xd503237f}, {M(0x2415e04), 0xd10203ff}, {M(0x2415e08), 0xa9027bfd}, {M(0x2415e0c), 0xa9036ffc},
+        },
         // ---- diagnostic (§4; "high" or better only)
         .pia_join_step = {M(0x16a9230), M(0x16a9390), M(0x16a94b0), M(0x16a9cf0), M(0x16aa010), M(0x16aa0f0),
                           M(0x16aa800)},
@@ -126,10 +159,35 @@ static const struct game_addrs kRows[] = {
         // ReadyVoteSetter 0x1cd0b50, event handler 0x1cc9da0) but the fields behind global+200 / +0x188 and the
         // PrivateRoomMain node are not (§4.3, §5).
         .room_start_event = 0x9d424b78,
-        // MKWMP_TRACE_KART / MKWMP_NO_IDLE_KICK: off. Entries 0x5c1680 (medium) / 0x5bb220, frames +0xc0, error id
-        // +0x1e4, move count +0x20c are mapped; state (+0x40?), strikes, position and +0x1fe are not, and
-        // MKWMP_NO_IDLE_KICK writes guest memory, so it stays refused until the state field is confirmed.
+        // MKWMP_TRACE_KART: the race-progress trace (kartrace.h), not the 1.0.0 kart_entry trace (kart_entry stays 0:
+        // 0x5bb220's x0 is a state entry, not the controller). Read in the binary 2026-11-21 (GAME-1.8.0-PROTOCOL.md
+        // §10.6): dispatcher 0x5bb220 inlines the racing update 0x5c1680 (`adr x8, 0x5c1680; cmp x1, x8`), state-9
+        // enter 0x23acc60 posts ctrl+0x1e4 (`add x0, x0, #0x1e4; bl 0x2981170`); the state is the state machine's
+        // current index (ctrl+0x38 +8, written by 0x584ac0). MKWMP_NO_IDLE_KICK writes guest memory and stays refused:
+        // the 1.8.0 battle-end check 0xd74a60 was not re-read for it.
         .kart_idle_kick = 0,
+        .kart_dispatch = M(0x5bb220), .kart_racing = M(0x5c1680), .kart_post = M(0x23acc60),
+        .kart_path_g = M(0x37c9a30), .kart_ptable_g = M(0x37b22f8), .kart_pos_g = M(0x37c7030),
+        .kl = {
+            .c_obj = 0x20, .c_info = 0x28, .c_lap = 0x30, .c_state = 0x40, .c_frames = 0xc0, .c_size = 0x240,
+            .i_player = 0x3c, .c_off = 0x222, .c_skip = 0x21f,
+            .w_error = 0x1e4, .w_strikes = 0x1e8, .w_xy = 0x1ec, .w_nomove = 0x1f4, .w_target = 0x1f8, .w_slow = 0x1fc,
+            .w_behind = 0x200, .w_grace = 0x204, .w_best = 0x208, .w_moves = 0x20c, .w_rescued = 0x210,
+            .w_window = 0x214,
+            .l_flags = 0x14, .l_p = 0x28, .l_best = 0x2c, .l_lap = 0x30, .l_cp = 0x32, .l_path = 0x307c,
+            .g_paths = 0x70, .p_scale = 0x68,                                   // 0x298da00
+            .t_count = 8, .t_items = 0x10, .t_mode = 0x1c, .t_size = 0xd8,      // 0xd92920, 0x5c1a00..0x5c1ad0
+            .t_local = 0xc4, .t_a = 0x50, .t_b = 0x54, .t_flags = 0xd0,        // +0xc4 / +0x54: pad indices (-1 remote)
+            .o_comp = 0x248, .o_map = 0xc8, .m_root = 0x200, .m_n1 = 0x210, .m_n2 = 0x218,   // 0x9d5ce0
+            .n_key = 0x18, .n_handle = 0x20, .h_ptr = 8, .h_gen = 0x10,
+            .a_actor = 0x80, .a_gen = 0x88, .a_state = 0x2c, .a_comp = 0x248, .a_comp2 = 0x100, .a_kart = 0x48,
+            .k_obj = 0x88, .ko_flags = 0x191, .k_idle = 0x5b8, .k_posref = 0x70, .r_idx = 0x18, .k_flags = 0x110,
+            .k_btn = 0x120, .k_stick = 0x128, .k_mode = 0x518,                    // 0x1227ac
+            // the pad manager [main+0x37c7030]: 0x2528bc0 (rule 1's stick), 0x5c1804 (pad idle +0x110), 0x2940c20
+            .q_count = 0x70, .q_items = 0x78, .q_default = 0xc0, .q_pos = 0x120,
+            .d_idle = 0x110, .d_held = 0x114, .d_rstick = 0x128, .d_src = 0x158, .d_on = 0x170, .d_conn = 0x198,
+            .d_size = 0x1a0,                                                       // pad update 0x2940de0
+        },
         .bulkget_lr = M(0x2107d48), .bulkget_fn = M(0x1593c30),
         .ctl_event_sink = M(0x20ffa60),
         .ctl_next_lr = M(0x297bc60), .ctl_prepare_lr = M(0x297b1c0), .ctl_mode = 0x4c8, .ctl_phase = 0x4cc,
@@ -147,19 +205,29 @@ static void move(uint64_t *a, size_t n, uint64_t delta) {
 }
 #define MOVE(field) move((uint64_t *)&(field), sizeof(field) / sizeof(uint64_t), delta)
 
+static void move_guards(struct game_guard *g, size_t n, uint64_t delta) {
+    for (size_t i = 0; i < n && g[i].at; i++) g[i].at += delta;   // 0 at: the end of the list
+}
+#define MOVE_GUARDS(field) move_guards((field), sizeof(field) / sizeof(field)[0], delta)
+
 static void rebase(struct game_addrs *r, uint64_t delta) {
     MOVE(r->grpc_timedwait_lr);
     MOVE(r->sdk_mono_source_slot), MOVE(r->sdk_tick_source);
     MOVE(r->errsvc_post), MOVE(r->errsvc_vtable);
-    MOVE(r->vt_online_pause), MOVE(r->fn_pause_open), MOVE(r->fn_pause_frame), MOVE(r->fn_plate_text);
     MOVE(r->stock_lo), MOVE(r->stock_hi);
     MOVE(r->cam_check_slot), MOVE(r->cam_check_fn), MOVE(r->cam_service), MOVE(r->cam_query_at), MOVE(r->cam_ret0);
+    MOVE(r->fr_vtables), MOVE(r->fr_changed), MOVE(r->fr_tick), MOVE(r->fr_reload), MOVE(r->fr_remap);
+    MOVE(r->fr_reinit), MOVE(r->fr_users_copy), MOVE(r->fr_users_free), MOVE_GUARDS(r->fr_guard);
+    MOVE(r->ro_vtable), MOVE(r->ro_update), MOVE(r->ro_ctrl_g), MOVE(r->ro_mgr_g);
+    MOVE(r->ro_match), MOVE(r->ro_match_slots), MOVE_GUARDS(r->ro_guard);
     MOVE(r->pia_join_step), MOVE(r->trace_ranges), MOVE(r->watch), MOVE(r->game_global);
     MOVE(r->room_sync), MOVE(r->room_main), MOVE(r->room_vote), MOVE(r->room_event);
-    MOVE(r->kart_entry), MOVE(r->bulkget_lr), MOVE(r->bulkget_fn);
+    MOVE(r->kart_entry), MOVE(r->kart_dispatch), MOVE(r->kart_racing), MOVE(r->kart_post);
+    MOVE(r->kart_path_g), MOVE(r->kart_ptable_g), MOVE(r->kart_pos_g), MOVE(r->bulkget_lr), MOVE(r->bulkget_fn);
     MOVE(r->ctl_event_sink), MOVE(r->ctl_next_lr), MOVE(r->ctl_prepare_lr), MOVE(r->seq_wait), MOVE(r->seq_start);
 }
-// Every uint64_t of struct game_addrs is an address and is in rebase(): a new one must be added there.
+// Every uint64_t of struct game_addrs is an address, and so is every game_guard's at: each is in rebase(), and a new
+// one must be added there.
 
 const struct game_addrs *game_addrs_for(int build) {
     enum { ROWS = sizeof kRows / sizeof kRows[0] };
@@ -206,22 +274,48 @@ int game_addrs_selfcheck(void) {
     int build = game_build();
     const struct game_addrs *a = game_addrs_for(build);
     if (!a) {
-        mkwmp_log("game build %s: no address table row, version-specific hooks stay off (voice menu, "
-                  "communication-error log and skips, traces, gRPC clock fix)", game_build_name(build));
+        mkwmp_log("game build %s: no address table row, version-specific hooks stay off (communication-error log "
+                  "and skips, traces, gRPC clock fix)", game_build_name(build));
         return -1;
     }
     int bad = 0;
     bad += !game_guard_words("gRPC timed wait call", a->grpc_timedwait_lr - 4, &a->grpc_timedwait_bl, 1);
     bad += !game_guard_slot("error service post", a->errsvc_vtable, 6, a->errsvc_post);
     bad += !game_guard_words("error service post", a->errsvc_post, a->errsvc_words, 2);
-    bad += !game_guard_slot("voice-ui open", a->vt_online_pause, a->slot_open, a->fn_pause_open);
-    bad += !game_guard_slot("voice-ui frame", a->vt_online_pause, a->slot_frame, a->fn_pause_frame);
-    bad += !game_guard_words("voice-ui plate text", a->fn_plate_text, a->plate_text_words, 4);
-    if (bad) mkwmp_log("game build %s: address table row found, %d of 6 guards FAILED (those hooks stay off)",
+    if (bad) mkwmp_log("game build %s: address table row found, %d of 3 guards FAILED (those hooks stay off)",
                        game_build_name(build), bad);
-    else mkwmp_log("game build %s: address table row found, 6 of 6 guards ok (hooks go in when Online Play opens)",
+    else mkwmp_log("game build %s: address table row found, 3 of 3 guards ok (hooks go in when Online Play opens)",
                    game_build_name(build));
     return bad;
+}
+
+int game_guard_friends(const struct game_addrs *a) {
+    if (!a || !a->fr_tick || !a->fr_vtables[0]) return 0;
+    for (int i = 0; i < 3; i++) {
+        uint64_t vt = a->fr_vtables[i];
+        if (!vt) continue;
+        if (!game_guard_slot("friend manager", vt, a->fr_slot_changed, a->fr_changed) ||
+            !game_guard_slot("friend manager", vt, a->fr_slot_tick, a->fr_tick) ||
+            !game_guard_slot("friend manager", vt, a->fr_slot_reload, a->fr_reload) ||
+            !game_guard_slot("friend manager", vt, a->fr_slot_remap, a->fr_remap))
+            return 0;
+    }
+    int n = 0;
+    for (size_t i = 0; i < sizeof a->fr_guard / sizeof a->fr_guard[0] && a->fr_guard[i].at; i++, n++)
+        if (!game_guard_words("friend manager", a->fr_guard[i].at, &a->fr_guard[i].word, 1)) return 0;
+    return n > 0 && a->fr_user_size > a->fr_user_account;
+}
+
+int game_guard_roster(const struct game_addrs *a) {
+    if (!a || !a->ro_update || !a->ro_vtable || !a->ro_ctrl_g || !a->ro_mgr_g) return 0;
+    if (!game_guard_slot("lobby roster", a->ro_vtable, a->ro_slot, a->ro_update)) return 0;
+    for (int f = 0; f < 2; f++)
+        for (int i = 0; i < 6 && a->ro_match_slots[f][i]; i++)
+            if (!game_guard_slot("lobby roster", a->ro_match_slots[f][i], 0, a->ro_match[f])) return 0;
+    int n = 0;
+    for (size_t i = 0; i < sizeof a->ro_guard / sizeof a->ro_guard[0] && a->ro_guard[i].at; i++, n++)
+        if (!game_guard_words("lobby roster", a->ro_guard[i].at, &a->ro_guard[i].word, 1)) return 0;
+    return n > 0;
 }
 
 int game_guard_slot(const char *what, uint64_t vtable, int slot, uint64_t expect) {

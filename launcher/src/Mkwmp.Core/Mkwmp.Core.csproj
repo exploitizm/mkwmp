@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Everything the launcher decides and does, without a window: config, the seat/lobby API, the
+       local API for the game patch, game targets (mkw-recomp first), updates, voice/camera glue.
+       Mkwmp.App only renders it. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <RootNamespace>Mkwmp.Core</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Tomlyn" />
+    <PackageReference Include="NSec.Cryptography" />
+    <PackageReference Include="ZstdSharp.Port" />
+    <PackageReference Include="AssetRipper.TextureDecoder" />
+    <PackageReference Include="SharpCompress" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- SharpCompress (MIT) is linked into the launcher: its licence ships beside it, with the launcher's others. -->
+    <Content Include="SharpCompress-LICENSE.txt" Link="licenses\SharpCompress-LICENSE.txt" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- The window's catalogs, built in (Catalogs.cs): en.json is the core's own English (Strings.cs), and with the
+       others a launcher that is alone in its folder still speaks the player's language. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\Mkwmp.App\i18n\*.json" LogicalName="Mkwmp.Core.%(Filename).json" Link="i18n\%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <!-- The changelog (Changelog.cs, the What's New page), built in for the same reason; a CHANGELOG.md beside the exe wins. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\..\CHANGELOG.md" LogicalName="Mkwmp.Core.CHANGELOG.md" Link="CHANGELOG.md" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The plan, the verified swap and its rollback: shared with updater.exe (docs/UPDATES.md). -->
+    <ProjectReference Include="..\Mkwmp.Update\Mkwmp.Update.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Mkwmp.Core.Tests" />
+  </ItemGroup>
+
+</Project>

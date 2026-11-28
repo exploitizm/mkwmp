@@ -1,6 +1,6 @@
 // The seat server's API (docs/contracts/SEAT_API.md), called directly by the plugin: what the MKWMP launcher does for
-// the probe when it runs, done here when it does not (mkw-recomp's own start screen and the mod's options page).
-// Users: seatd.c (the game: seat, heartbeat, friends) and modpage.c (the options page: register, PIN, friends).
+// the probe when it runs, done here when it does not (the game started without the launcher, with the account
+// the launcher wrote into the mod's settings). Users: seatd.c (the game: seat, heartbeat, friends).
 // Blocking calls (plat_http); any thread.
 #ifndef MKWMP_SEATAPI_H
 #define MKWMP_SEATAPI_H
@@ -65,6 +65,7 @@ typedef struct {
     int position, seats_total;
     int next_poll_ms;
     char ticket[520], ticket_lobby[128];     // seated
+    char room[400];                          // the view's "room" object as the server wrote it; "" for null or none
 } SeatApiView;
 SeatApiResult seatapi_join(const char *base, const char *name, const char *pin, SeatApiView *out);
 SeatApiResult seatapi_poll(const char *base, const char *session_id, const char *session_key, SeatApiView *out);

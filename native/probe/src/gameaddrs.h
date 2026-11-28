@@ -15,7 +15,6 @@
 #include <stdint.h>
 
 enum {
-    GAME_ROWS_MAX = 26,       // most name plates on the online pause menu of any build (1.0.0: 24, 1.8.0: 26)
     GAME_PIA_STEPS = 7,
     GAME_TRACE_RANGES = 9,
     GAME_WATCH = 6,
@@ -41,14 +40,6 @@ struct game_addrs {
     uint64_t errsvc_post, errsvc_vtable;
     uint32_t errsvc_words[2];
     uint32_t err_referee_timeout;   // id dropped by MKWMP_SKIP_REFEREE_TIMEOUT=1
-    // voice_ui.c: UIPageOnlinePauseMenu. Guards: the two slots hold fn_pause_open / fn_pause_frame, and
-    // fn_plate_text(ctl, char16*) starts with plate_text_words.
-    uint64_t vt_online_pause, fn_pause_open, fn_pause_frame, fn_plate_text;
-    uint32_t plate_text_words[4];
-    uint16_t slot_open, slot_frame;
-    uint16_t rows;                  // plates on the page (<= GAME_ROWS_MAX)
-    uint16_t page_plates, plate_size, entry_name, entry_me;
-    uint32_t page_count, page_entries;
     // A guest module whose calls to the gated SDK overrides always get the runtime's stock handler (npln.c
     // gate_call): 1.8.0's subsdk0 "movie" shares nn::socket::Close/GetLastError/EventFd* with gRPC. 0: none.
     uint64_t stock_lo, stock_hi;
@@ -77,6 +68,44 @@ struct game_addrs {
     uint64_t cam_ret0;
     uint32_t cam_ret0_words[2];
     uint16_t g_flags4, cam_setup_bit;
+    // nxfriends.c: the friends the game's server names, read from the game's friend manager (Nextendo mode). 0
+    // fr_tick: off for the build.
+    //   fr_vtables: the manager's class and its two subclasses; all three hold the same four functions in slots
+    //     fr_slot_changed ("the console's friend list has a friend the manager has not", fr_changed), fr_slot_tick
+    //     (the per-frame update, fr_tick: the hooked one), fr_slot_reload (read the console's list again, fr_reload)
+    //     and fr_slot_remap (attach server friends to console friends, fr_remap). Guards: every slot of every table.
+    //   fr_reinit(manager): the game's own "start over for the signed-in user" (list read again on the next update).
+    //   fr_users_copy(client; result in x8): a copy of the friend users the server named (a vector of fr_user_size
+    //     byte elements: a string, the account id at +fr_user_account); fr_users_free(&&vector) frees it.
+    //   fr_guard: instruction words that pin the functions above and the offsets below (0 at: end of the list).
+    //   manager: +fr_client the server's friend client (0 when signed out), +fr_state 1 once its first answer was
+    //     applied (0 before: +fr_op is then the start operation, whose virtual at table offset fr_op_done answers
+    //     "finished?"), +fr_count / +fr_items the console friends (pointers), each with a "has a server user" byte
+    //     at +fr_mapped.
+    uint64_t fr_vtables[3];
+    uint8_t fr_slot_changed, fr_slot_tick, fr_slot_reload, fr_slot_remap;
+    uint64_t fr_changed, fr_tick, fr_reload, fr_remap, fr_reinit, fr_users_copy, fr_users_free;
+    struct game_guard { uint64_t at; uint32_t word; } fr_guard[24];
+    uint16_t fr_client, fr_op, fr_op_done, fr_state, fr_count, fr_items, fr_mapped, fr_user_size, fr_user_account;
+    // rosterhook.c: who is in the online lobby, read from the game's member tree (research LOBBY-ROSTER-1.8.0.md;
+    // LAUNCHER_API.md "Previous races"). 0 ro_update: off for the build.
+    //   ro_update(controller): the online race controller's per-frame update, held by slot ro_slot of ro_vtable alone
+    //     (the hooked one: it rebuilds the member tree of its contexts).
+    //   context = [[ro_ctrl_g] + ro_ctx + 8 * slot], slot = u32 [[[ro_mgr_g] + ro_mgr] + ro_cur] (2 and up: none);
+    //     rl: the tree in the context and the fields of one node (roster.h).
+    //   ro_match: the two functions that send the referee request, once per match, after writing the match's key
+    //     (a string) at node + ro_match_key; ro_match_slots: the vtable slots (addresses) that hold each (0: end).
+    //   ro_guard: instruction words that pin the functions above and the offsets (0 at: end of the list).
+    uint64_t ro_vtable, ro_update, ro_ctrl_g, ro_mgr_g;
+    uint8_t ro_slot;
+    uint16_t ro_ctx, ro_mgr, ro_cur, ro_match_key;
+    struct roster_layout {
+        uint16_t root, count;                          // context: root node pointer, node count (u32)
+        uint16_t left, right, key, local, ussid;       // node: children, key (u32), "a local player" byte, ussid (u32)
+        uint16_t uid, st, name, sid, lid;              // node: uid string, st (u32), name string, p2p_sid (u64), p2p_lid (u8)
+    } rl;                                              // a string: char * at +0, capacity (u32) at +8
+    uint64_t ro_match[2], ro_match_slots[2][6];
+    struct game_guard ro_guard[24];
 
     // ---------------------------------------------------------------- diagnostic (0 address = off)
     uint64_t pia_join_step[GAME_PIA_STEPS];         // JoinRandomSessionJob step functions
@@ -103,6 +132,43 @@ struct game_addrs {
     uint16_t kart_info, kart_player, kart_state, kart_frames, kart_error, kart_strikes, kart_pos, kart_moves, kart_fe;
     uint16_t kart_size;
     uint8_t kart_idle_kick;
+    // MKWMP_TRACE_KART race-progress trace (kartrace.h; 1.8.0, research GAME-1.8.0-PROTOCOL.md §10.6). 0 kart_dispatch:
+    // off. kart_dispatch: the controller's state update (x0 = state entry: object +8, delegate +0x20, this-adjust
+    // +0x28; it inlines kart_racing, the racing update, when that is the delegate); kart_racing (x0 = controller);
+    // kart_post: the state-9 enter that posts the latched id (x0 = controller). Globals (addresses of the pointer
+    // variables): course path, player table, kart position table.
+    uint64_t kart_dispatch, kart_racing, kart_post;
+    uint64_t kart_path_g, kart_ptable_g, kart_pos_g;
+    struct kart_layout {
+        // controller: kart object, info (player index at +i_player), LapChecker pointer, state, frames, size read
+        uint16_t c_obj, c_info, c_lap, c_state, c_frames, c_size, i_player;
+        // controller bytes: bit 0 of c_off = no rule at all; c_skip non-zero = no rules 3-5
+        uint16_t c_off, c_skip;
+        // controller: the watchdog's fields
+        uint16_t w_error, w_strikes, w_xy, w_nomove, w_target, w_slow, w_behind, w_grace, w_best, w_moves, w_rescued,
+            w_window;
+        // LapChecker: state flags, progress, best, lap (s8) + highest lap (s8), checkpoint (s16), path selector
+        uint16_t l_flags, l_p, l_best, l_lap, l_cp, l_path;
+        uint16_t g_paths, p_scale;               // path global -> two path pointers at +g_paths; scale float at +p_scale
+        // player table: header (count u32 +t_count, entries +t_items, mode u32 +t_mode); entry size; local index,
+        // two indices that must be >= 0, flags (bit 0 must be set)
+        uint16_t t_count, t_items, t_mode, t_size, t_local, t_a, t_b, t_flags;
+        // kart lookup: obj +o_comp -> +o_map = map (root +m_root, two non-zero words +m_n1/+m_n2), node key +n_key,
+        // handle at node +n_handle (holder +h_ptr, generation +h_gen); holder: actor +a_actor, generation +a_gen;
+        // actor: state +a_state, -> +a_comp -> +a_comp2 -> kart +a_kart
+        uint16_t o_comp, o_map, m_root, m_n1, m_n2, n_key, n_handle, h_ptr, h_gen, a_actor, a_gen, a_state, a_comp,
+            a_comp2, a_kart;
+        // kart: kart object +k_obj (flags byte +ko_flags), no-input frames +k_idle, controller ref +k_posref (pad
+        // index +r_idx), flags +k_flags; the kart's own input: buttons u32 +k_btn, left stick float[2] +k_stick, input
+        // mode +k_mode (1, 2: steering animation reads the pad directly, else +k_stick; 0x1227ac)
+        uint16_t k_obj, ko_flags, k_idle, k_posref, r_idx, k_flags, k_btn, k_stick, k_mode;
+        // pad (controller) table: count +q_count, items +q_items (pointers), default pad +q_default; left stick float[2]
+        // at pad +q_pos (the XY of watchdog rule 1: a stick, not a kart position)
+        uint16_t q_count, q_items, q_default, q_pos;
+        // pad: no-input frames (float) +d_idle, held buttons +d_held, right stick +d_rstick, source device +d_src,
+        // "follows its source" byte +d_on, connected byte +d_conn, bytes read +d_size (0x2940de0)
+        uint16_t d_idle, d_held, d_rstick, d_src, d_on, d_conn, d_size;
+    } kl;
     // always-on logs of profile_dispatch
     uint64_t bulkget_lr, bulkget_fn;                // BulkGetDocuments result retrieval: return address, target
     uint64_t ctl_event_sink;                        // online race controller: event sink
@@ -121,6 +187,10 @@ const struct game_addrs *game_addrs(void);
 // Guards: 1 when guest memory holds the expected value. A mismatch (or unreadable memory) is logged with `what`.
 int game_guard_words(const char *what, uint64_t addr, const uint32_t *words, int n);
 int game_guard_slot(const char *what, uint64_t vtable, int slot, uint64_t expect);
+// Every guard of the row's friend manager fields (fr_*): 1 when all hold, 0 without them or on a mismatch (logged).
+int game_guard_friends(const struct game_addrs *a);
+// Every guard of the row's lobby roster fields (ro_*), the same way.
+int game_guard_roster(const struct game_addrs *a);
 // Read-only check of every functional guard of the running build, with one summary line in mkwmp.log (npln.c runs it
 // once, at the game's first gated SDK call, so an offline session already shows whether the row fits). Returns the
 // number of failed guards, -1 without a row. Only meaningful once main is mapped, and before any vtable is hooked.

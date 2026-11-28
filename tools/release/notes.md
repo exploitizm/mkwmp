@@ -1,4 +1,210 @@
-**mkwmp 1.3.1**: mkw-recomp 0.1.16, and the server side of what's coming next.
+**mkwmp 1.5.4**: Previous Races, and your Nextendo username everywhere.
+
+The launcher installs this update by itself from 1.4.4. From 1.4.3, accept the update when it offers it. **Nextendo Network support in MKWMP is still experimental.**
+
+- **Previous Races** (friends panel, Settings › Profile): your online sessions, every player with the ID the server gave them, every name each one used, and "Copy Report". A player who renames between races is flagged. Kept on this PC for 30 days, never sent anywhere by itself.
+- **Your Nextendo username everywhere** in the launcher, with your Nextendo picture: the name other players see in races.
+
+---
+**mkwmp 1.5.4-rc.1** (Alpha test version): Previous Races, and your Nextendo username everywhere.
+
+This is a test version for the Alpha channel (Settings › Updates › Update Channel). **Nextendo Network support in MKWMP is still experimental.** To go back, choose Stable: the launcher offers "Return to Stable".
+
+- **Previous Races** (friends panel, Settings › Profile): your online sessions, every player with the ID the server gave them, every name each one used, and "Copy Report". A player who renames between races is flagged. Kept on this PC for 30 days, never sent anywhere by itself.
+- **Your Nextendo username everywhere** in the launcher, with your Nextendo picture: the name other players see in races.
+
+---
+**mkwmp 1.5.3**: players in lobbies on Home, controllers in the overlay, Debug mode.
+
+The launcher installs this update by itself from 1.4.4. From 1.4.3, accept the update when it offers it. **Nextendo Network support in MKWMP is still experimental.**
+
+- **"In lobbies: N"** on the Play card: the players racing right now on Nextendo (or seated on your MKWMP server).
+- **Switch Pro Controller, Joy-Con and DualSense in the overlay** over a running game, Home button back to the game, and button hints that match your controller.
+- **Debug mode** in Settings › Support: a detailed trace of the next games for bug reports; PLAY asks each time.
+
+---
+**mkwmp 1.5.3-rc.1** (Alpha test version): players in lobbies on Home, controllers in the overlay, Debug mode.
+
+This is a test version for the Alpha channel (Settings › Updates › Update Channel). **Nextendo Network support in MKWMP is still experimental.** To go back, choose Stable: the launcher offers "Return to Stable".
+
+- **"In lobbies: N"** on the Play card: the players racing right now on Nextendo (or seated on your MKWMP server).
+- **Switch Pro Controller, Joy-Con and DualSense in the overlay** over a running game, Home button back to the game, and button hints that match your controller.
+- **Debug mode** in Settings › Support: a detailed trace of the next games for bug reports; PLAY asks each time.
+
+---
+**mkwmp 1.5.2**: real friend names in game, Nextendo profile pictures, and more controllers in the launcher.
+
+The launcher installs this update by itself from 1.4.4. From 1.4.3, accept the update when it offers it. **Nextendo Network support in MKWMP is still experimental.**
+
+- **Real friend names inside the game on Nextendo**, instead of "Friend 1", "Friend 2"…
+- **Nextendo profile pictures** for your friends and yourself in the friends panel, on Home and on your account card.
+- **Switch Pro Controller, Joy-Con and DualSense** now work in the launcher even when Windows does not see them as an Xbox controller.
+
+---
+**mkwmp 1.5.2-rc.1** (Alpha test version): real friend names in game and profile pictures on Nextendo.
+
+This is a test version for the Alpha channel (Settings › Updates › Update Channel). **Nextendo Network support in MKWMP is still experimental.** To go back, choose Stable: the launcher offers "Return to Stable".
+
+- **Real friend names inside the game on Nextendo**, instead of "Friend 1", "Friend 2"…
+- **Nextendo profile pictures** for your friends and yourself in the friends panel, on Home and on your account card.
+
+---
+**mkwmp 1.5.1**: Nextendo friends, ghosts, and an Alpha update channel.
+
+**Nextendo Network support in MKWMP is still experimental**: races work, while friends inside the game, groups and ghosts are new and not fully tested yet. If something goes wrong, MKWMP servers remain available in Settings › Online.
+
+The launcher installs this update by itself from 1.4.4. From 1.4.3, accept the update when it offers it.
+
+- **Nextendo friends in the friends panel**: add by friend code, accept or decline requests, see who is online or playing, favorite, remove or block, and add players you met in recent races.
+- **Friend notifications and presence on Nextendo**, with a "Show Me Online to Friends" switch in Settings › Nextendo.
+- **Friends inside the game on Nextendo**: they appear in the game's friend list (as "Friend 1", "Friend 2"… for now).
+- **Ghosts on Nextendo**: time trial ghost downloads and uploads.
+- **Update channel**: Settings › Updates › Stable or Alpha (test versions). Leaving Alpha offers "Return to Stable".
+
+---
+**mkwmp 1.5.0**: play online on Nextendo Network.
+
+The launcher installs this update by itself from 1.4.4. From 1.4.3, accept the update when it offers it.
+
+- **Sign in with Nextendo** (or create an account) and race online on Nextendo Network. You sign in on nextendo.network in your browser; the sign-in stays on your device and is never sent to MKWMP servers.
+- **Nextendo first**: the welcome and Home lead with Nextendo. Your Nextendo account and friend code are on Home and in Settings › Nextendo.
+- **MKWMP servers remain an alternative**: Settings › Online › "Use MKWMP Servers Instead". Players already on an MKWMP server stay on it, with an invitation to try Nextendo.
+- On Nextendo, voice, camera and MKWMP friends are not available (MKWMP-server features).
+
+---
+**mkwmp 1.4.9**: a roomier Mods page, with filters and a mod panel beside the list.
+
+The launcher installs this update by itself from 1.4.4. From 1.4.3, accept the update when it offers it.
+
+- **Get Mods, From Link and From Zip in one line** at the top of Mods, so your list starts right under them.
+- **Filters**: "Installed" has chips for All, On, Off, and Updates while one of your mods has one.
+- **Update and Options on each mod's line**, where they apply. Turn All Off is Y in the bottom bar.
+- **A mod opens beside the list**: its switch, options and details slide in from the right; Y uninstalls it, B closes it. A mod you just installed opens there too.
+
+---
+**mkwmp 1.4.8**: mkw-recomp's start screen is yours again, and Home has four cards.
+
+The launcher installs this update by itself from 1.4.4. From 1.4.3, accept the update when it offers it.
+
+- **mkw-recomp's start screen is no longer locked on Skip** (Settings › General). It is back to mkw-recomp's default, Automatic: starting mkw.exe yourself on a PC shows it again, and you can pick Always, Automatic or Skip. Play from the launcher still goes straight into the game.
+- **Home: four cards.** Play, Get Mods (the mod store), Checklist (ready to play, or what is in the way) and What's New. The bar has Mods again, your own mod list, with a dot when one of your mods has an update; the checklist moved to its card.
+- **Mods page.** The ways to get a mod are at the top, above your mods.
+- **Get Mods page.** A Mods button goes to your own mods, and the mature-pictures button is an eye (crossed out while they are blurred).
+
+---
+**mkwmp 1.4.7**: mkw-recomp 0.1.18 is required, the launcher now updates an mkw-recomp you installed yourself, and Home is tidier.
+
+The launcher installs this update by itself from 1.4.4. From 1.4.3, accept the update when it offers it.
+
+- **mkw-recomp 0.1.18 is required.** MKWMP runs only on mkw-recomp 0.1.18. Play is refused on an earlier version, and the MKWMP mod turns itself off on one, also when the game is started outside the launcher.
+- **Your own mkw-recomp is updated too, where it is.** If you picked an mkw-recomp you installed yourself (0.1.15, 0.1.16 or 0.1.17), the launcher now brings it to 0.1.18 in that same folder. Your game, its setup, saves, mods and settings stay, and the game code is not rebuilt. Before, such an install stayed on 0.1.17.
+- **The update is not optional.** When mkw-recomp is not 0.1.18, the launcher opens the update card by itself and runs it; Play opens it too. It asks again whenever the version goes wrong, also when mkw-recomp's own updater moved it.
+- **mkw-recomp's update check is on again** (Settings › General). The launcher turns it back on once; after that it is your choice.
+- **Open mkw-recomp.** A new row in Settings › Game opens mkw-recomp's own start screen instead of the game: its settings, game files, mods and tools.
+- **Home: Play, Mods, What's New.** The cards are Play, Mods and What's New; Friends and the checklist stay in the bar below, which no longer has Mods and Updates. A new MKWMP shows on the What's New card with a pink badge (New, the download's percentage, Ready or Failed) and a progress bar, and the card opens the update.
+
+---
+**mkwmp 1.4.6**: mkw-recomp 0.1.18, which fixes the game closing silently on some Windows 11 PCs, and DLSS, FSR 3.1 and HD vibration that download themselves.
+
+The launcher installs this update by itself from 1.4.4. From 1.4.3, accept the update when it offers it. It then updates mkw-recomp 0.1.17 to 0.1.18 in place: the game code is not rebuilt.
+
+- **mkw-recomp 0.1.18** by Adrià. It fixes the game closing silently on some Windows 11 PCs right after it starts (error 0xC0000409). Your game, its setup, saves, mods and settings stay. 0.1.17 still plays online.
+- **DLSS, FSR 3.1 and HD vibration download themselves.** Picking NVIDIA DLSS, AMD FSR 3.1 or their frame generation in Settings › Graphics, or HD vibration in Settings › Controls, downloads the library it needs next to mkw.exe from its official source (NVIDIA, AMD or RenHDrum), checked against mkw-recomp's own list. It works at the game's next start. DLSS is downloaded only on a PC with an NVIDIA card. A library you already put there is kept.
+- **New game settings from 0.1.18.** Settings › Controls: HD vibration (RenHDrum), the game's two-band vibration on player 1's DualSense, Pro Controller, Xbox One S or Steam Controller. Settings › Advanced: VRAM pressure eviction and Video memory log, the two settings mkw-recomp asks players to try if the game gets slower the longer they play (its issue #481). All three are off by default.
+
+---
+
+**mkwmp 1.4.5**: after a failed update you can still play, offline.
+
+The launcher installs this update by itself from 1.4.4. From 1.4.3, accept the update when it offers it.
+
+- **After a failed update, play offline.** If an update can't be downloaded or installed, the card offers Try Again, Continue Offline and Quit. Continue Offline lets you play offline until you close the launcher; online play waits for the update ("Update MKWMP to play online"), and Try the Update Again is on Home, in the friends panel and in Settings. The launcher asks again the next time it opens. Your server, PIN and choices are kept.
+
+---
+
+**mkwmp 1.4.4**: touch that works, smoother scrolling, tidier Online and Voice & Camera settings, and updates that install themselves.
+
+The launcher updates itself from 1.4.x: accept the update when it offers it. From this version on you won't be asked again: a new version is downloaded and installed by itself.
+
+- **Updates install themselves.** When a new MKWMP is out, the launcher downloads it at once and installs it before you play: Install and Restart, or it does it by itself after a few seconds. It never restarts under a running game (it installs when the game closes), and without a connection you play as before. If an install fails you can try again or carry on for now. "Update Automatically" is gone from Settings.
+- **Touch: a drag scrolls, a tap taps.** Buttons and list entries act when you lift your finger, and only if you didn't drag: starting a drag on a button now scrolls the list instead of pressing it. The file picker's list can be dragged on a Steam Deck too.
+- **Smoother, faster scrolling.** Holding a direction, spinning the wheel or using the right stick moves a list in one even motion instead of small jumps, and everything scrolls a bit faster.
+- **Choose a Server in two columns.** The server list scrolls on its own at the left; the address, the server's answer and Connect are at the right. With a controller: A on a server, A again to go on.
+- **Settings › Online, reorganized.** The server is one row with its status and Disconnect; right below it are Privacy Policy, Report Abuse and a new Connect to Another Server.
+- **Report Abuse** (it was "Report Voice Abuse" under Voice & Camera) is now a page of its own under Settings › Online.
+- **One privacy page.** The Privacy Policy row shows whether you accepted it (a mark and "Accepted" or "Not accepted") and opens the same page as the first setup: what the server keeps, its policy, and under them the switch to accept or withdraw.
+- **Settings › Voice & Camera, reorganized.** Voice and camera each start with one switch ("Use voice in private rooms", "Use camera in private rooms") with the device and its test under it. "See Friends' Cameras" is part of the camera switch; "Show My Camera" stays for seeing friends without being seen; mirroring your picture is on the Test Camera page.
+- **What a switch turns off is hidden**, not greyed out: with voice or camera off, their devices and tests are not shown.
+- **Text boxes**: the grey hint is exactly where your typing starts.
+- **Friends panel and file picker** no longer sit behind the bottom bar; each shows its own button hints.
+
+---
+**mkwmp 1.4.3**: the official mkw-recomp 0.1.17, new graphics options, and the fix for the crash when a 4th player joins.
+
+The launcher updates itself from 1.4.x: accept the update when it offers it, then accept the mkw-recomp update and the quick Set Up Again (the game code is not rebuilt).
+
+- **Fixed: the crash when a 4th player joins a room.** MKWMP's own pause-menu voice marks read the game's player list wrongly from the 4th player on; they are gone.
+- **MKWMP no longer draws anything in the game**: no voice marks or mute keys in the pause menu, no pop-ups, no tabs in mkw-recomp's menu, no camera name tiles. Everything is set in the launcher. There is no muting for now (players muted before stay muted; unmute them in Settings › Voice & Camera).
+- **mkw-recomp: the official 0.1.17** by Adrià, in place of MKWMP's build: what online play needed is now in it. Your game, saves, mods and settings stay.
+- **New game settings from 0.1.17**: AI upscaling (NVIDIA DLSS on RTX cards or AMD FSR 3.1), upscaling quality, frame generation, NVIDIA Reflex, shadow map, and "first controller to player 2". All off by default. DLSS and FSR 3.1 need their libraries next to mkw.exe, which mkw-recomp does not ship.
+- **Steam Deck and Linux**: the controller is found at start and NVIDIA cards no longer crash at loading under Proton (both handled by the launcher and the mod now); the overlay comes to the front on KDE Plasma.
+- **Controls**: the launcher and the game agree on the button layout (Switch, Xbox, Automatic), and mkw-recomp's own menu shortcut never takes your overlay shortcut's buttons.
+
+---
+
+**mkwmp 1.4.2**: a Ready to Play checklist, your own overlay button, smoother scrolling and touch, and a tidier Mods list.
+
+The launcher updates itself from 1.4.0 and 1.4.1: accept the update when it offers it. Coming from 1.3, follow the 1.4.0 instructions further below.
+
+- **Ready to Play checklist.** Home's dock, Settings › Game, and Play when something is missing open a page listing what the game needs: mkw-recomp in the version MKWMP needs, your copy of the game, game version 1.8.0, the game set up on this device, MKWMP's files in the game, launcher updates and, online, server and sign-in. Each row has a button that fixes it. Play stays off until every row is ready.
+- **Set the game up again.** Rebuild the game from your copy from Settings › Game or the checklist (saves, mods and settings stay). The launcher also notices when your copy changed since it was set up and asks you to set it up again.
+- **Choose the button that opens MKWMP in the game.** Settings › Game › Overlay Shortcut: Guide or Select + Start (as before), Guide, Select + Start, hold Select, hold Start, L3 + R3, LB + RB + Start, Select + LB, Select + RB. Each choice says what it may clash with (Guide opens Steam's menu or Xbox Game Bar). On a Steam Deck, hold Select is a good pick.
+- **Smoother, faster scrolling, and touch.** About a third faster per wheel step with a smooth glide, touchpads in small steps, the right stick scrolls; drag and flick lists with a finger.
+- **Switch button layout in the launcher too**: with the game's Switch layout, the right button confirms.
+- **Contrast**: the dark theme stands out more, and Settings › Appearance › Contrast sets it.
+- **Mods list**: one compact line per mod with its size, a switch on each row, and Turn All Off / Turn All Back On.
+- **Credits**: Settings › About links to mkw-recomp, its creator Adrià, its license and the source of MKWMP's build.
+- **Server**: the crash some players saw about an hour into a session (often noticed when a 4th player joined) was fixed on the official server on 2026-11-21; servers you host get the same fix with this release's server.
+
+---
+
+**mkwmp 1.4.1**: privacy fixes for the new launcher and the mod.
+
+The 1.4.0 launcher updates itself to 1.4.1: accept the update when it offers it. Coming from 1.3, follow the 1.4.0 instructions below.
+
+- **No more "location in use".** Windows no longer shows the location icon for the launcher. The Wi-Fi bars in the top bar used to read the network's name, which Windows counts as location; they now use Windows' signal bars.
+- **"Show closest to me"** over the server list (Settings › Online and the first setup). On, the launcher measures the delay to each listed server while the list is on screen and shows the nearest first. Off, no server is measured and the list keeps the directory's order. Your location is never used.
+- **Microphone and camera only during friend-room races.** The mod opens your microphone and camera only in a friend room with voice or camera on, and closes them when you leave the room or the game. Before, the camera could open for the game's "Use the camera?" question in the menus. The launcher's own microphone and camera tests stop when you leave the page or switch to another window.
+- **The server line counts players.** Home shows the players out of the seats, 0/50, not the free seats.
+
+---
+
+**From 1.4.0**
+
+**mkwmp 1.4.0**: a new launcher. It sets the game up for you, plays offline first, and has a server browser, mods and an in-game overlay.
+
+**Coming from 1.3: download this one by hand.** 1.3 can't update itself to the new launcher. Unzip `mkwmp-1.4.0-windows-x64.zip` into the same folder as your 1.3: it keeps your gamertag, PIN, server and choices. Then delete the old `mkwmp-launcher.exe`. On a Steam Deck, run `curl -fsSL https://anarqz.github.io/mkwmp/install.sh | bash` in Desktop Mode (Konsole) with Steam closed: it does all of this and keeps your 1.3 settings.
+
+- **Game setup built in.** Point the launcher at your own copy of the game (1.8.0: a .nup, an .nx or a folder). It downloads mkw-recomp 0.1.16-mkwmp.1 (checked by its hash; the no-AVX2 build on CPUs that need it), builds the game (about 4 minutes of compiling, then shaders), installs the MKWMP mod and keeps everything next to itself (portable: nothing in AppData). Settings › Game can switch to another copy of yours later, usually in seconds.
+- **Offline first.** Once it's set up, the game plays without an account. Online is one choice away.
+- **Server browser.** Public servers list themselves in the server directory; the launcher shows them nearest first, with latency and free seats. Or type the address a host gave you.
+- **Friends, voice and camera** in private friend rooms only, as in 1.3.
+- **In-game overlay** (mkw-recomp 0.1.16-mkwmp with the mod): Guide (Home) or Select + Start pauses the game and opens the launcher over it: friends, settings, Quit game.
+- **Mods:** browse and install from GameBanana, or from a .zip, .7z or .rar; switch mods on and off; mods with options get their own page. Plugin mods ask before they run code; mods that change the game's code stay on mkw-recomp's own Mods page. Every player's save is backed up before you play with a new set of mods.
+- **Privacy on the server.** After you sign in, the launcher shows the server's own privacy policy, and the server records which version you accepted. You're asked again when it changes.
+- **Made for a controller**, a keyboard or a mouse, in 15 languages, light or dark, full screen or in a window. The launcher (`mkwmp.exe`) updates itself with `updater.exe`.
+- **Crash reports.** After a crash the launcher offers a report: a zip on your Desktop (no PIN or keys) and a prefilled GitHub issue.
+
+**This release has two downloads:** `mkwmp-1.4.0-windows-x64.zip` (the launcher, also for the Steam Deck through Proton) and the server, `mkwmp-server-1.4.0.zip` (`server` for Linux, `server.exe` for Windows). `SHA256SUMS` and `SHA256SUMS.sig` sign both.
+
+For people hosting a server:
+- The program is now called `server` (`server.exe`): `server host`, `server seat` (the seat API, was `mkwmp server`; `server server` still works), `server lobby`, `server beholder`, `server admin`.
+- **One command sets up a Vultr VM:** `curl -fsSL https://anarqz.github.io/mkwmp/deploy-mkwmp-server.sh | sudo bash` installs the signed server, the services, the firewall and your privacy policy, and lists the server in the directory. Re-run it to update. Guide: https://anarqz.github.io/mkwmp/host.html
+- `[privacy] enforce = true` now makes sense: 1.4.0 launchers accept the policy on the server. Leave it off until your players have 1.4.0.
+
+---
+
+**From 1.3.1** (**mkwmp 1.3.1**: mkw-recomp 0.1.16, and the server side of what's coming next.)
 
 - **mkw-recomp [0.1.16-mkwmp.1](https://github.com/anarqz/mkw-recomp/releases/tag/v0.1.16-mkwmp.1)** is the recommended version: MKWMP's build of mkw-recomp 0.1.16, with the camera. Its setup now also runs under Wine/Proton. If your CPU has no AVX2, take the `-noavx2` zip. The official **0.1.16** is supported too, as well as 0.1.15-mkwmp, 0.1.15, 0.1.13, 0.1.12 and 0.1.10. The MKWMP mod works with 0.1.15 and newer. Coming from 0.1.15-mkwmp, open mkw-recomp once and let it finish its setup: the launcher tells you when that's needed.
 - The launcher passes the server's room details (which lobby, who's in it) to the game, so crash reports can say which room a crash happened in.
@@ -7,7 +213,6 @@ For people hosting a server:
 - `GET /privacy` serves your privacy policy (`[privacy] file`; a generic default otherwise), and the server records which version each player accepted. The next launcher (1.4.0) asks players to accept it; `[privacy] enforce = true` then refuses seats to players who haven't. Leave it off while your players are on 1.3.x.
 - `[announce]` lists your server in a server directory (a "beholder"), which the next launcher shows as a server browser. `mkwmp beholder` runs a directory yourself. See [HOSTING](https://github.com/anarqz/mkwmp/blob/main/docs/HOSTING.md).
 - `GET /ping` for the launcher's latency check.
-
 ---
 
 **From 1.3.0** (**mkwmp 1.3.0**: camera and voice chat in friend rooms, the MKWMP mod for mkw-recomp, and mkw-recomp 0.1.15.)
@@ -58,7 +263,7 @@ For people hosting a server: `mkwmp admin reports`, `close-report` and `delete-r
 
 ---
 
-**From 1.0.0** (**mkwmp 1.0.0**: online races, battles and friend rooms for Mario Kart World on community servers, with lobby voice chat.)
+**From 1.0.0** (**mkwmp 1.0.0**: online races, battles and friend rooms for MKW on community servers, with lobby voice chat.)
 
 Download one zip and unzip it anywhere:
 

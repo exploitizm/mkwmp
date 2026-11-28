@@ -209,9 +209,15 @@ int plat_mem_write_u64(uint64_t *at, uint64_t v) {
     return 1;
 }
 
-// ---- input: the title owns the controllers; the voice UI's keyboard shortcuts do not exist here
+// ---- input: the title owns the controllers; the overlay's keyboard trigger does not exist here
 int plat_game_focused(void) { return 0; }
 int plat_key_down(int key) { (void)key; return 0; }
 
-// ---- process
+// ---- process: one title, no other programs to start or hand the foreground to
 void plat_no_error_dialogs(void) {}
+unsigned long plat_process_id(void) { return (unsigned long)getpid(); }
+void plat_allow_foreground(void) {}
+int plat_spawn(const char *exe, const char *args) {
+    (void)exe, (void)args;
+    return 0;
+}

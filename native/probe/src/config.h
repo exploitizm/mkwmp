@@ -1,4 +1,4 @@
-// Client config read by the probe from <game dir>\mkwmp.toml (written by mkwmp-launcher).
+// Client config read by the probe from <game dir>\mkwmp.toml (written by the launcher).
 // Presence of the file opts the game into multiplayer; its absence means a stock offline
 // launch. Even when present the probe stays dormant (stock offline behaviour) until the game
 // asks for the network (Online Play), see seat.h.
@@ -7,8 +7,14 @@
 
 #include <stddef.h>
 
+// Whose servers the game plays on (`backend = "nextendo"`; absent or anything else: an MKWMP server).
+// docs/contracts/NEXTENDO_API.md.
+typedef enum { BACKEND_MKWMP = 0, BACKEND_NEXTENDO } MkwmpBackend;
+
 typedef struct {
     int present;             // a config file was found and parsed
+    int backend;             // MkwmpBackend. Nextendo: no server / ticket / voice (voice_port is 0, ticket empty)
+    char nextendo_ca[96];    // Nextendo's CA, a file beside mkwmp.toml (PEM); default "nextendo-ca.pem"
     char host[128];          // lobby host: IP literal or hostname (default 127.0.0.1)
     int port;                // lobby port (default 8900)
     char name[64];           // player username (may be empty)
@@ -21,6 +27,8 @@ typedef struct {
                              // default "mkwmp-lobby-ca.pem" (see lobby_ca.h)
     int voice_port;          // lobby voice relay UDP port (default 8907, 0 = voice off; VOICE_API.md)
     int direct;              // no launcher: the plugin signs in itself (seatd.c, mkwmp_config_use_direct)
+    char launcher_exe[300];  // the launcher's executable (`launcher_exe = "C:/.../mkwmp.exe"`, forward
+                             // slashes), for the mod to start it as its overlay host (overlay.c); may be empty
 } MkwmpConfig;
 
 // Parse the minimal `key = "value"` / `key = N` format. Pure; unit-tested.
@@ -46,7 +54,11 @@ void mkwmp_config_set_voice_port(int port);
 // A seat service answers /local/v1/... : the launcher, or the plugin itself (direct).
 int mkwmp_config_has_seat(const MkwmpConfig *c);
 
-// Re-read mkwmp.toml (e.g. the launcher restarted with a new token). Returns the same cache.
+// Re-read mkwmp.toml (e.g. the launcher restarted with a new token). Returns the same cache. The backend stays the
+// one the process started with: the game cannot change networks while it runs.
 const MkwmpConfig *mkwmp_config_reload(void);
+
+// The session plays on Nextendo Network (mkwmp_config()->backend, for readers who want the question).
+int mkwmp_config_nextendo(void);
 
 #endif
